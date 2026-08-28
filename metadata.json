@@ -1,0 +1,6 @@
+{
+  "name": "OdontoClínica - Gestão de Pacientes Odontologia",
+  "description": "Aplicativo completo para estudantes de odontologia: gestão clínica com prontuário digital, odontograma 2D interativo, exames radiográficos com filtro negativo, mentor de IA com literatura odontológica completa, lembretes de WhatsApp, chat de dupla com áudio, checklists e relatórios acadêmicos em PDF.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
