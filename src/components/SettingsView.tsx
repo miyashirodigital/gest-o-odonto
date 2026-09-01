@@ -12,11 +12,7 @@ import {
   GraduationCap,
   HardDrive,
   Users,
-  FileText,
-  CloudCheck,
-  Database,
-  Smartphone,
-  Laptop
+  FileText
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -32,10 +28,7 @@ export const SettingsView: React.FC = () => {
     setPrivacyMode, 
     resetToDefaultData, 
     patients, 
-    showToast,
-    syncStatus,
-    lastSyncedTime,
-    triggerCloudSync
+    showToast
   } = useApp();
 
   // Student details state
@@ -309,57 +302,6 @@ export const SettingsView: React.FC = () => {
                 <div className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 ${privacyMode ? 'left-6' : 'left-1'}`} />
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* Firebase & Cloud Live Sync Management */}
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-emerald-100/80 dark:border-slate-800 p-5 md:p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-600" />
-              Sincronização Automática (Firebase & Nuvem)
-            </h3>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Auto-Save Ativo
-            </span>
-          </div>
-
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Todas as alterações (novos pacientes, odontogramas, evoluções, agendamentos e tarefas) são gravadas automaticamente no banco de dados <strong>Firebase Firestore</strong> e no servidor em nuvem.
-          </p>
-
-          <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-slate-800/60 border border-emerald-100 dark:border-slate-700 text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-medium">Status do Salvamento:</span>
-              <span className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                <CloudCheck className="w-3.5 h-3.5" />
-                {syncStatus === 'syncing' ? 'Sincronizando...' : 'Conectado e Atualizado'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>Última gravação:</span>
-              <span className="font-mono">{lastSyncedTime || 'Em tempo real'}</span>
-            </div>
-            <div className="flex items-center gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-300">
-              <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>Celular</span>
-              <span className="text-slate-300 dark:text-slate-600">⇄</span>
-              <Laptop className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>Computador & Tablet (tempo real)</span>
-            </div>
-          </div>
-
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={() => triggerCloudSync()}
-              disabled={syncStatus === 'syncing'}
-              className="w-full sm:w-auto px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-transform active:scale-95"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-              Forçar Sincronização Imediata
-            </button>
           </div>
         </div>
 

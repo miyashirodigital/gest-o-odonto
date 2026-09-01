@@ -420,71 +420,88 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         }
 
-        // 3. Reconcile and Merge: Prioritize cloud data on new devices, merge if both exist
-        const mergedPatients: Patient[] = storedPatients && storedPatients.length > 0 && cloudData?.patients
-          ? mergeById<Patient>(storedPatients, cloudData.patients)
-          : (cloudData?.patients !== undefined ? cleanDummy<Patient>(cloudData.patients) : (storedPatients || INITIAL_PATIENTS));
-        setPatients(mergedPatients);
-        saveToStorage('patients', mergedPatients);
+        // 3. Reconcile and Merge: Cloud data (Firebase / Server) is the authoritative shared single database
+        let activePatients = cleanDummy<Patient>(storedPatients || INITIAL_PATIENTS);
+        if (cloudData && Array.isArray(cloudData.patients) && cloudData.patients.length > 0) {
+          activePatients = cleanDummy<Patient>(cloudData.patients);
+        } else if (storedPatients && storedPatients.length > 0) {
+          activePatients = cleanDummy<Patient>(storedPatients);
+        }
+        setPatients(activePatients);
+        saveToStorage('patients', activePatients);
 
-        const mergedAppointments: Appointment[] = storedAppointments && storedAppointments.length > 0 && cloudData?.appointments
-          ? mergeById<Appointment>(storedAppointments, cloudData.appointments)
-          : (cloudData?.appointments !== undefined ? cleanDummy<Appointment>(cloudData.appointments) : (storedAppointments || INITIAL_APPOINTMENTS));
-        setAppointments(mergedAppointments);
-        saveToStorage('appointments', mergedAppointments);
+        let activeAppointments = cleanDummy<Appointment>(storedAppointments || INITIAL_APPOINTMENTS);
+        if (cloudData && Array.isArray(cloudData.appointments)) {
+          activeAppointments = cleanDummy<Appointment>(cloudData.appointments);
+        } else if (storedAppointments && storedAppointments.length > 0) {
+          activeAppointments = cleanDummy<Appointment>(storedAppointments);
+        }
+        setAppointments(activeAppointments);
+        saveToStorage('appointments', activeAppointments);
 
-        const mergedTasks: TaskItem[] = storedTasks && storedTasks.length > 0 && cloudData?.tasks
-          ? mergeById<TaskItem>(storedTasks, cloudData.tasks)
-          : (cloudData?.tasks !== undefined ? cleanDummy<TaskItem>(cloudData.tasks) : (storedTasks || INITIAL_TASKS));
-        setTasks(mergedTasks);
-        saveToStorage('tasks', mergedTasks);
+        let activeTasks = cleanDummy<TaskItem>(storedTasks || INITIAL_TASKS);
+        if (cloudData && Array.isArray(cloudData.tasks)) {
+          activeTasks = cleanDummy<TaskItem>(cloudData.tasks);
+        } else if (storedTasks && storedTasks.length > 0) {
+          activeTasks = cleanDummy<TaskItem>(storedTasks);
+        }
+        setTasks(activeTasks);
+        saveToStorage('tasks', activeTasks);
 
-        const mergedChat: ChatMessage[] = storedChat && storedChat.length > 0 && cloudData?.chatMessages
-          ? mergeById<ChatMessage>(cleanDummy<ChatMessage>(storedChat), cloudData.chatMessages)
-          : (cloudData?.chatMessages !== undefined ? cleanDummy<ChatMessage>(cloudData.chatMessages) : cleanDummy<ChatMessage>(storedChat || INITIAL_CHAT_MESSAGES));
-        setChatMessages(mergedChat);
-        saveToStorage('chat_messages', mergedChat);
+        let activeChat = cleanDummy<ChatMessage>(storedChat || INITIAL_CHAT_MESSAGES);
+        if (cloudData && Array.isArray(cloudData.chatMessages)) {
+          activeChat = cleanDummy<ChatMessage>(cloudData.chatMessages);
+        }
+        setChatMessages(activeChat);
+        saveToStorage('chat_messages', activeChat);
 
-        const mergedDisciplines: DisciplineConfig[] = storedDisciplines && storedDisciplines.length > 0 && cloudData?.disciplines
-          ? mergeById<DisciplineConfig>(storedDisciplines, cloudData.disciplines)
-          : (cloudData?.disciplines !== undefined && cloudData.disciplines.length > 0 ? cloudData.disciplines : (storedDisciplines || INITIAL_DISCIPLINES));
-        setDisciplines(mergedDisciplines);
-        saveToStorage('disciplines', mergedDisciplines);
+        let activeDisciplines = storedDisciplines || INITIAL_DISCIPLINES;
+        if (cloudData && Array.isArray(cloudData.disciplines) && cloudData.disciplines.length > 0) {
+          activeDisciplines = cloudData.disciplines;
+        }
+        setDisciplines(activeDisciplines);
+        saveToStorage('disciplines', activeDisciplines);
 
-        const mergedNotices: AcademicNotice[] = storedNotices && storedNotices.length > 0 && cloudData?.notices
-          ? mergeById<AcademicNotice>(cleanDummy<AcademicNotice>(storedNotices), cloudData.notices)
-          : (cloudData?.notices !== undefined ? cleanDummy<AcademicNotice>(cloudData.notices) : cleanDummy<AcademicNotice>(storedNotices || INITIAL_NOTICES));
-        setNotices(mergedNotices);
-        saveToStorage('notices', mergedNotices);
+        let activeNotices = cleanDummy<AcademicNotice>(storedNotices || INITIAL_NOTICES);
+        if (cloudData && Array.isArray(cloudData.notices)) {
+          activeNotices = cleanDummy<AcademicNotice>(cloudData.notices);
+        }
+        setNotices(activeNotices);
+        saveToStorage('notices', activeNotices);
 
-        const mergedStudies: StudySubject[] = storedStudies && storedStudies.length > 0 && cloudData?.studySubjects
-          ? mergeById<StudySubject>(cleanDummy<StudySubject>(storedStudies), cloudData.studySubjects)
-          : (cloudData?.studySubjects !== undefined ? cleanDummy<StudySubject>(cloudData.studySubjects) : cleanDummy<StudySubject>(storedStudies || INITIAL_STUDY_SUBJECTS));
-        setStudySubjects(mergedStudies);
-        saveToStorage('study_subjects', mergedStudies);
+        let activeStudies = cleanDummy<StudySubject>(storedStudies || INITIAL_STUDY_SUBJECTS);
+        if (cloudData && Array.isArray(cloudData.studySubjects)) {
+          activeStudies = cleanDummy<StudySubject>(cloudData.studySubjects);
+        }
+        setStudySubjects(activeStudies);
+        saveToStorage('study_subjects', activeStudies);
 
-        const mergedExams: ExamSchedule[] = storedExams && storedExams.length > 0 && cloudData?.examSchedules
-          ? mergeById<ExamSchedule>(cleanDummy<ExamSchedule>(storedExams), cloudData.examSchedules)
-          : (cloudData?.examSchedules !== undefined ? cleanDummy<ExamSchedule>(cloudData.examSchedules) : cleanDummy<ExamSchedule>(storedExams || INITIAL_EXAM_SCHEDULES));
-        setExamSchedules(mergedExams);
-        saveToStorage('exam_schedules', mergedExams);
+        let activeExams = cleanDummy<ExamSchedule>(storedExams || INITIAL_EXAM_SCHEDULES);
+        if (cloudData && Array.isArray(cloudData.examSchedules)) {
+          activeExams = cleanDummy<ExamSchedule>(cloudData.examSchedules);
+        }
+        setExamSchedules(activeExams);
+        saveToStorage('exam_schedules', activeExams);
 
-        const mergedResources: GoogleResourceLink[] = storedResources && storedResources.length > 0 && cloudData?.googleResources
-          ? mergeById<GoogleResourceLink>(cleanDummy<GoogleResourceLink>(storedResources), cloudData.googleResources)
-          : (cloudData?.googleResources !== undefined ? cleanDummy<GoogleResourceLink>(cloudData.googleResources) : cleanDummy<GoogleResourceLink>(storedResources || INITIAL_GOOGLE_RESOURCES));
-        setGoogleResources(mergedResources);
-        saveToStorage('google_resources', mergedResources);
+        let activeResources = cleanDummy<GoogleResourceLink>(storedResources || INITIAL_GOOGLE_RESOURCES);
+        if (cloudData && Array.isArray(cloudData.googleResources)) {
+          activeResources = cleanDummy<GoogleResourceLink>(cloudData.googleResources);
+        }
+        setGoogleResources(activeResources);
+        saveToStorage('google_resources', activeResources);
 
-        if (cloudData?.student || storedStudent) {
-          const finalStudent = cloudData?.student || storedStudent || INITIAL_STUDENT;
-          setCurrentStudent(finalStudent);
-          saveToStorage('student_profile', finalStudent);
+        if (cloudData?.student) {
+          setCurrentStudent(cloudData.student);
+          saveToStorage('student_profile', cloudData.student);
+        } else if (storedStudent) {
+          setCurrentStudent(storedStudent);
         }
 
-        if (cloudData?.dupla || storedDupla) {
-          const finalDupla = cloudData?.dupla || storedDupla || INITIAL_DUPLA;
-          setDuplaPartner(finalDupla);
-          saveToStorage('dupla_partner', finalDupla);
+        if (cloudData?.dupla) {
+          setDuplaPartner(cloudData.dupla);
+          saveToStorage('dupla_partner', cloudData.dupla);
+        } else if (storedDupla) {
+          setDuplaPartner(storedDupla);
         }
 
         if (cloudData?.settings) {
@@ -495,15 +512,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         // Push reconciled state back to server and firestore to ensure all backends match
         const fullPayload = {
-          patients: mergedPatients,
-          appointments: mergedAppointments,
-          tasks: mergedTasks,
-          chatMessages: mergedChat,
-          disciplines: mergedDisciplines,
-          notices: mergedNotices,
-          studySubjects: mergedStudies,
-          examSchedules: mergedExams,
-          googleResources: mergedResources,
+          patients: activePatients,
+          appointments: activeAppointments,
+          tasks: activeTasks,
+          chatMessages: activeChat,
+          disciplines: activeDisciplines,
+          notices: activeNotices,
+          studySubjects: activeStudies,
+          examSchedules: activeExams,
+          googleResources: activeResources,
           student: cloudData?.student || storedStudent || INITIAL_STUDENT,
           dupla: cloudData?.dupla || storedDupla || INITIAL_DUPLA,
           settings: { darkMode, privacyMode, userPin },
@@ -739,47 +756,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (data) {
             isInternalChange.current = true;
             if (Array.isArray(data.patients)) {
-              const clean = cleanDummy(data.patients);
+              const clean = cleanDummy<Patient>(data.patients);
               setPatients(clean);
               saveToStorage('patients', clean);
             }
             if (Array.isArray(data.appointments)) {
-              const clean = cleanDummy(data.appointments);
+              const clean = cleanDummy<Appointment>(data.appointments);
               setAppointments(clean);
               saveToStorage('appointments', clean);
             }
             if (Array.isArray(data.tasks)) {
-              const clean = cleanDummy(data.tasks);
+              const clean = cleanDummy<TaskItem>(data.tasks);
               setTasks(clean);
               saveToStorage('tasks', clean);
             }
             if (Array.isArray(data.chatMessages)) {
-              const clean = cleanDummy(data.chatMessages);
+              const clean = cleanDummy<ChatMessage>(data.chatMessages);
               setChatMessages(clean);
               saveToStorage('chat_messages', clean);
             }
             if (Array.isArray(data.disciplines) && data.disciplines.length > 0) {
-              const clean = cleanDummy(data.disciplines);
+              const clean = data.disciplines as DisciplineConfig[];
               setDisciplines(clean);
               saveToStorage('disciplines', clean);
             }
             if (Array.isArray(data.notices)) {
-              const clean = cleanDummy(data.notices);
+              const clean = cleanDummy<AcademicNotice>(data.notices);
               setNotices(clean);
               saveToStorage('notices', clean);
             }
             if (Array.isArray(data.studySubjects)) {
-              const clean = cleanDummy(data.studySubjects);
+              const clean = cleanDummy<StudySubject>(data.studySubjects);
               setStudySubjects(clean);
               saveToStorage('study_subjects', clean);
             }
             if (Array.isArray(data.examSchedules)) {
-              const clean = cleanDummy(data.examSchedules);
+              const clean = cleanDummy<ExamSchedule>(data.examSchedules);
               setExamSchedules(clean);
               saveToStorage('exam_schedules', clean);
             }
             if (Array.isArray(data.googleResources)) {
-              const clean = cleanDummy(data.googleResources);
+              const clean = cleanDummy<GoogleResourceLink>(data.googleResources);
               setGoogleResources(clean);
               saveToStorage('google_resources', clean);
             }
@@ -947,44 +964,109 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const triggerCloudSync = async () => {
     setIsSyncing(true);
     setSyncStatus('syncing');
-    await pushCloudState({
-      patients,
-      appointments,
-      tasks,
-      chatMessages,
-      disciplines,
-      notices,
-      student: currentStudent,
-      dupla: duplaPartner,
-      settings: {
-        darkMode,
-        privacyMode,
-        userPin
-      },
-      updatedAt: Date.now()
-    });
-    await pushToFirestore();
-    const { state: latestCloudState } = await fetchCloudState();
-    if (latestCloudState && latestCloudState.patients) {
-      isInternalChange.current = true;
-      setPatients(latestCloudState.patients);
-      if (latestCloudState.appointments) setAppointments(latestCloudState.appointments);
-      if (latestCloudState.tasks) setTasks(latestCloudState.tasks);
-      if (latestCloudState.chatMessages) setChatMessages(latestCloudState.chatMessages);
-      if (latestCloudState.disciplines) setDisciplines(latestCloudState.disciplines);
-      if (latestCloudState.notices) setNotices(latestCloudState.notices);
-      if (latestCloudState.student) setCurrentStudent(latestCloudState.student);
-      if (latestCloudState.dupla) setDuplaPartner(latestCloudState.dupla);
-      setTimeout(() => {
-        isInternalChange.current = false;
-      }, 150);
+    try {
+      // 1. Fetch latest from Firebase Firestore FIRST
+      const db = dbRef.current || getFirebaseDB();
+      let latestCloudData: any = null;
+      if (db) {
+        try {
+          const docRef = doc(db, 'odonto_clinic', 'main_workspace');
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data && (data.patients || data.student || data.dupla || data.appointments)) {
+              latestCloudData = data;
+            }
+          }
+        } catch (e) {
+          console.warn('[Firestore] Pull warning:', e);
+        }
+      }
+
+      // 2. If not from Firestore, fetch from Server
+      if (!latestCloudData) {
+        const { state: serverState } = await fetchCloudState();
+        if (serverState && (serverState.patients || serverState.student || serverState.dupla || serverState.appointments)) {
+          latestCloudData = serverState;
+        }
+      }
+
+      // 3. If cloud data exists, apply it to the local app immediately
+      if (latestCloudData) {
+        isInternalChange.current = true;
+        if (Array.isArray(latestCloudData.patients)) {
+          const clean = cleanDummy<Patient>(latestCloudData.patients);
+          setPatients(clean);
+          saveToStorage('patients', clean);
+        }
+        if (Array.isArray(latestCloudData.appointments)) {
+          const clean = cleanDummy<Appointment>(latestCloudData.appointments);
+          setAppointments(clean);
+          saveToStorage('appointments', clean);
+        }
+        if (Array.isArray(latestCloudData.tasks)) {
+          const clean = cleanDummy<TaskItem>(latestCloudData.tasks);
+          setTasks(clean);
+          saveToStorage('tasks', clean);
+        }
+        if (Array.isArray(latestCloudData.chatMessages)) {
+          const clean = cleanDummy<ChatMessage>(latestCloudData.chatMessages);
+          setChatMessages(clean);
+          saveToStorage('chat_messages', clean);
+        }
+        if (Array.isArray(latestCloudData.disciplines) && latestCloudData.disciplines.length > 0) {
+          const clean = latestCloudData.disciplines as DisciplineConfig[];
+          setDisciplines(clean);
+          saveToStorage('disciplines', clean);
+        }
+        if (Array.isArray(latestCloudData.notices)) {
+          const clean = cleanDummy<AcademicNotice>(latestCloudData.notices);
+          setNotices(clean);
+          saveToStorage('notices', clean);
+        }
+        if (Array.isArray(latestCloudData.studySubjects)) {
+          const clean = cleanDummy<StudySubject>(latestCloudData.studySubjects);
+          setStudySubjects(clean);
+          saveToStorage('study_subjects', clean);
+        }
+        if (Array.isArray(latestCloudData.examSchedules)) {
+          const clean = cleanDummy<ExamSchedule>(latestCloudData.examSchedules);
+          setExamSchedules(clean);
+          saveToStorage('exam_schedules', clean);
+        }
+        if (Array.isArray(latestCloudData.googleResources)) {
+          const clean = cleanDummy<GoogleResourceLink>(latestCloudData.googleResources);
+          setGoogleResources(clean);
+          saveToStorage('google_resources', clean);
+        }
+        if (latestCloudData.student) {
+          setCurrentStudent(latestCloudData.student);
+          saveToStorage('student_profile', latestCloudData.student);
+        }
+        if (latestCloudData.dupla) {
+          setDuplaPartner(latestCloudData.dupla);
+          saveToStorage('dupla_partner', latestCloudData.dupla);
+        }
+        setTimeout(() => {
+          isInternalChange.current = false;
+        }, 150);
+      } else {
+        // If cloud was empty, push local state to cloud
+        await syncStateToCloudAndFirestore(true);
+      }
+
+      setSyncStatus('synced');
+      const now = new Date();
+      const timeStr = `Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`;
+      setLastSyncedTime(timeStr);
+      showToast('Aplicativo sincronizado com o banco único do Firebase (Celular ⇄ PC)!', 'success');
+    } catch (err) {
+      console.warn('Sync error:', err);
+      setSyncStatus('idle');
+      showToast('Falha na sincronização. Verifique a conexão com a internet.', 'warning');
+    } finally {
+      setIsSyncing(false);
     }
-    setIsSyncing(false);
-    setSyncStatus('synced');
-    const now = new Date();
-    const timeStr = `Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-    setLastSyncedTime(timeStr);
-    showToast('Dados clínicos e configurações sincronizados com sucesso na Nuvem (Celular ⇄ PC)!', 'success');
   };
 
   const triggerDriveSync = triggerCloudSync;

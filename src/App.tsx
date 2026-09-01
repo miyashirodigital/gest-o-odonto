@@ -21,7 +21,6 @@ import {
   Sun, 
   Lock, 
   Unlock, 
-  CloudCheck, 
   Wifi, 
   WifiOff, 
   Sparkles, 
@@ -34,9 +33,7 @@ import {
   BookOpen,
   UserPlus,
   CalendarPlus,
-  RefreshCw,
-  Smartphone,
-  Laptop
+  RefreshCw
 } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -377,29 +374,8 @@ const MainAppContent: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Clean controls with mode switches & Firebase Auto-Save status */}
+            {/* Right: Clean controls with mode switches */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Firebase / Cloud Auto-Save Status Badge */}
-              <button
-                type="button"
-                onClick={() => triggerCloudSync()}
-                className="hidden xs:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-200/80 dark:border-emerald-800/80 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 text-xs font-semibold hover:bg-emerald-100/70 dark:hover:bg-emerald-900/50 transition-colors"
-                title={`Salvamento automático no Firebase ativo. Última sincronização: ${lastSyncedTime || 'agora'}. Clique para sincronizar agora.`}
-              >
-                {syncStatus === 'syncing' ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 animate-spin" />
-                    <span className="hidden sm:inline">Salvando...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <CloudCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span className="hidden sm:inline">Firebase Salvo</span>
-                  </>
-                )}
-              </button>
-
               <button 
                 type="button"
                 onClick={() => setPrivacyMode(!privacyMode)}
