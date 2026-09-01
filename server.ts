@@ -231,6 +231,9 @@ async function startServer() {
     chatMessages?: any[];
     disciplines?: any[];
     notices?: any[];
+    studySubjects?: any[];
+    examSchedules?: any[];
+    googleResources?: any[];
     student?: any;
     dupla?: any;
     settings?: any;

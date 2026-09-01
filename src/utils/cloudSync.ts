@@ -65,15 +65,18 @@ export async function fetchCloudState(): Promise<{ state: CloudClinicState | nul
 
 export async function pushCloudState(updates: Partial<CloudClinicState>): Promise<boolean> {
   try {
+    const payload = JSON.stringify({
+      ...updates,
+      source: typeof window !== 'undefined' ? (window.innerWidth < 768 ? 'Celular' : 'Computador') : 'Device'
+    });
+
     const res = await fetch('/api/sync/state', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        ...updates,
-        source: typeof window !== 'undefined' ? (window.innerWidth < 768 ? 'Celular' : 'Computador') : 'Device'
-      })
+      body: payload,
+      keepalive: true
     });
     return res.ok;
   } catch (err) {
