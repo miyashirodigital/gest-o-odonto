@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Patient, DisciplineType } from '../types';
-import { X, UserPlus, AlertTriangle, ShieldCheck, HeartPulse, Sparkles } from 'lucide-react';
+import { X, UserPlus, AlertTriangle, ShieldCheck, HeartPulse, Sparkles, Camera, Image, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface PatientModalProps {
@@ -12,8 +12,10 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
   const { addPatient, updatePatient, disciplines, showToast } = useApp();
 
   const [activeStep, setActiveStep] = useState<'dados' | 'anamnese' | 'alergias'>('dados');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dados Gerais
+  const [photoUrl, setPhotoUrl] = useState<string>(patient?.photoUrl || '');
   const [name, setName] = useState<string>(patient?.name || '');
   const [cpf, setCpf] = useState<string>(patient?.cpf || '');
   const [rg, setRg] = useState<string>(patient?.rg || '');
@@ -63,6 +65,7 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
     const continuousMedications = medicationsText.split(',').map(m => m.trim()).filter(Boolean);
 
     const payload = {
+      photoUrl: photoUrl || undefined,
       name,
       cpf,
       rg,
@@ -116,6 +119,22 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
     onClose();
   };
 
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('A imagem deve ter no máximo 5MB.', 'warning');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPhotoUrl(reader.result as string);
+      showToast('Foto do paciente carregada com sucesso!');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-3xl w-full p-6 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
@@ -154,7 +173,7 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
-            1. Dados Pessoais & Prontuário
+            1. Dados Pessoais & Foto
           </button>
           <button
             type="button"
@@ -185,6 +204,58 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
         <form onSubmit={handleSubmit} className="py-4 space-y-4 overflow-y-auto flex-1 pr-1 text-xs">
           {activeStep === 'dados' && (
             <div className="space-y-3.5 animate-in fade-in duration-150">
+              {/* Photo Upload Section */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50/60 dark:bg-slate-800/60 border border-emerald-100 dark:border-slate-700 flex flex-col sm:flex-row items-center gap-4">
+                <div className="relative group shrink-0">
+                  {photoUrl ? (
+                    <img
+                      src={photoUrl}
+                      alt="Foto do paciente"
+                      className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-500 shadow-md"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-center text-lg border-2 border-dashed border-emerald-300 dark:border-emerald-700">
+                      {name ? name.split(' ').map(n => n[0]).slice(0, 2).join('') : <Camera className="w-6 h-6 text-emerald-600" />}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5 flex-1 text-center sm:text-left">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 block text-xs">
+                    Foto de Perfil do Paciente (Opcional)
+                  </span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Adicione uma foto de rosto para facilitar a identificação visual na clínica e no prontuário.
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-xs flex items-center gap-1.5 transition-colors"
+                    >
+                      <Camera className="w-3.5 h-3.5" /> Escolher Foto
+                    </button>
+                    {photoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setPhotoUrl('')}
+                        className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Remover
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">

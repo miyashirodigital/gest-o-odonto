@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "ClinicWorkspace": {
+      "title": "ClinicWorkspace",
+      "description": "Master workspace containing clinic patients, appointments, tasks, notices, disciplines and student profile for real-time sync",
+      "type": "object",
+      "properties": {
+        "patients": {
+          "type": "array",
+          "description": "List of dental clinic patients and charts"
+        },
+        "appointments": {
+          "type": "array",
+          "description": "List of clinical schedule appointments"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Checklist and clinical tasks"
+        },
+        "disciplines": {
+          "type": "array",
+          "description": "Academic dental disciplines and procedure counts"
+        },
+        "notices": {
+          "type": "array",
+          "description": "Academic notices and exam deadlines"
+        },
+        "student": {
+          "type": "object",
+          "description": "Student profile data"
+        },
+        "dupla": {
+          "type": "object",
+          "description": "Clinical dupla partner profile"
+        },
+        "settings": {
+          "type": "object",
+          "description": "App user interface settings"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last modification"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/odonto_clinic/{workspaceId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Clinic shared workspace document for real-time synchronization across student devices"
+    }
+  }
+}

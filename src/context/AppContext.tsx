@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { 
   Patient, 
   Appointment, 
@@ -10,7 +10,11 @@ import {
   ClinicalEvolution, 
   RadiographExam, 
   StudentProfile, 
-  DuplaPartner 
+  DuplaPartner,
+  StudySubject,
+  StudyTopic,
+  ExamSchedule,
+  GoogleResourceLink
 } from '../types';
 import { 
   INITIAL_PATIENTS, 
@@ -21,7 +25,11 @@ import {
   INITIAL_NOTICES, 
   INITIAL_STUDENT, 
   INITIAL_DUPLA, 
+  INITIAL_STUDY_SUBJECTS,
+  INITIAL_EXAM_SCHEDULES,
+  INITIAL_GOOGLE_RESOURCES,
   getFromStorage, 
+  getSyncStorage, 
   saveToStorage 
 } from '../utils/storage';
 import {
@@ -33,7 +41,14 @@ import {
   syncChannel,
   FirebaseCustomConfig
 } from '../utils/firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import {
+  fetchCloudState,
+  pushCloudState,
+  pushChatMessageToCloud,
+  subscribeToCloudEvents,
+  CloudClinicState
+} from '../utils/cloudSync';
 
 export type ViewTab = 
   | 'dashboard' 
@@ -42,9 +57,8 @@ export type ViewTab =
   | 'calendar' 
   | 'gallery' 
   | 'tasks' 
-  | 'chat' 
-  | 'ai-assistant' 
   | 'disciplines' 
+  | 'studies'
   | 'reports' 
   | 'settings';
 
@@ -70,6 +84,8 @@ interface AppContextType {
   triggerCloudSync: () => Promise<void>;
   triggerDriveSync: () => Promise<void>;
   isSyncing: boolean;
+  connectedDevicesCount: number;
+  isCloudConnected: boolean;
 
   // Firebase integration
   isFirebaseActive: boolean;
@@ -95,6 +111,9 @@ interface AppContextType {
   chatMessages: ChatMessage[];
   disciplines: DisciplineConfig[];
   notices: AcademicNotice[];
+  studySubjects: StudySubject[];
+  examSchedules: ExamSchedule[];
+  googleResources: GoogleResourceLink[];
 
   // Patient Actions
   addPatient: (patient: Omit<Patient, 'id' | 'createdAt' | 'updatedAt'>) => string;
@@ -120,7 +139,7 @@ interface AppContextType {
 
   // Chat Actions
   sendChatMessage: (content: string, imageUrlOrPatientTag?: string, senderOverride?: string, extra?: string) => void;
-  sendVoiceMessage: (durationSeconds: number) => void;
+  sendVoiceMessage: (durationSeconds: number, audioUrl?: string, patientTag?: string) => void;
   deleteChatMessage: (id: string) => void;
   clearChatMessages: () => void;
 
@@ -133,6 +152,19 @@ interface AppContextType {
   updateDiscipline: (id: string, updates: Partial<DisciplineConfig>) => void;
   updateDisciplineTarget: (id: string, completedCount: number) => void;
 
+  // Studies & Exams Actions
+  addStudySubject: (subject: Omit<StudySubject, 'id' | 'topics'>) => void;
+  updateStudySubject: (id: string, updates: Partial<StudySubject>) => void;
+  deleteStudySubject: (id: string) => void;
+  addStudyTopic: (subjectId: string, topic: Omit<StudyTopic, 'id'>) => void;
+  toggleStudyTopic: (subjectId: string, topicId: string) => void;
+  deleteStudyTopic: (subjectId: string, topicId: string) => void;
+  addExamSchedule: (exam: Omit<ExamSchedule, 'id'>) => void;
+  updateExamSchedule: (id: string, updates: Partial<ExamSchedule>) => void;
+  deleteExamSchedule: (id: string) => void;
+  addGoogleResource: (resource: Omit<GoogleResourceLink, 'id'>) => void;
+  deleteGoogleResource: (id: string) => void;
+
   // Data Management
   resetToDefaultData: () => void;
 
@@ -143,6 +175,83 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+const DUMMY_IDS = new Set([
+  'p1', 'p2', 'p3',
+  'apt-1', 'apt-2', 'apt-3',
+  'tsk-1', 'tsk-2', 'tsk-3', 'tsk-4',
+  'subj-1', 'subj-2', 'subj-3',
+  'exam-1', 'exam-2',
+  'gres-1', 'gres-2',
+  'not-1', 'not-2', 'not-3', 'not-4',
+  'msg-1', 'msg-2', 'msg-3', 'msg-4'
+]);
+
+const DUMMY_TITLES = new Set([
+  'Esterilizar kits de periodontia e curetas Gracey',
+  'Buscar trabalho protético no laboratório (Coroa dente 21)',
+  'Comprar cimento resinoso e pontas misturadoras',
+  'Montar apresentação do seminário de cirurgia',
+  'Prazo de entrega das Fichas de Dentística (1º Bimestre)',
+  'Prova Prática de Anestesiologia & Cirurgia Ambulatorial',
+  'Seminário de Apresentação de Casos Clínicos de Endodontia'
+]);
+
+const DUMMY_NAMES = new Set([
+  'Ana Carolina Mendes',
+  'Lucas Gabriel Silveira',
+  'Dona Maria de Lourdes Santos'
+]);
+
+function cleanDummy<T extends { id?: string; title?: string; patientName?: string; name?: string }>(items: T[] | null | undefined): T[] {
+  if (!Array.isArray(items)) return [];
+  return items.filter((i) => {
+    if (!i) return false;
+    if (i.id && DUMMY_IDS.has(i.id)) return false;
+    if (i.title && DUMMY_TITLES.has(i.title)) return false;
+    if (i.patientName && DUMMY_NAMES.has(i.patientName)) return false;
+    if (i.name && DUMMY_NAMES.has(i.name)) return false;
+    return true;
+  });
+}
+
+// Helper to merge lists of objects by ID safely
+function mergeById<T extends { id: string; updatedAt?: string | number }>(
+  localList: T[],
+  remoteList: T[]
+): T[] {
+  const cleanLocal = cleanDummy(localList);
+  const cleanRemote = cleanDummy(remoteList);
+  if (!Array.isArray(cleanRemote) || cleanRemote.length === 0) return Array.isArray(cleanLocal) ? cleanLocal : [];
+  if (!Array.isArray(cleanLocal) || cleanLocal.length === 0) return cleanRemote;
+
+  const map = new Map<string, T>();
+
+  // 1. Populate with remote items
+  for (const item of cleanRemote) {
+    if (item && item.id) {
+      map.set(item.id, item);
+    }
+  }
+
+  // 2. Merge local items: keep local items not present in remote
+  // If present in both, keep the one with newer or equal updatedAt
+  for (const localItem of cleanLocal) {
+    if (!localItem || !localItem.id) continue;
+    const remoteItem = map.get(localItem.id);
+    if (!remoteItem) {
+      map.set(localItem.id, localItem);
+    } else {
+      const localTime = localItem.updatedAt ? new Date(localItem.updatedAt).getTime() : 0;
+      const remoteTime = remoteItem.updatedAt ? new Date(remoteItem.updatedAt).getTime() : 0;
+      if (localTime >= remoteTime) {
+        map.set(localItem.id, localItem);
+      }
+    }
+  }
+
+  return Array.from(map.values());
+}
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentTab, setCurrentTab] = useState<ViewTab>('dashboard');
@@ -162,43 +271,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'idle'>('synced');
-  const [lastSyncedTime, setLastSyncedTime] = useState<string>('Hoje às 17:30');
+  const [lastSyncedTime, setLastSyncedTime] = useState<string>('Nuvem Ativa');
+  const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
 
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [toastData, setToastData] = useState<{ text: string; type: 'success' | 'info' | 'warning' | 'error' } | null>(null);
 
   // Student & Dupla state
   const [currentStudent, setCurrentStudent] = useState<StudentProfile>(() => {
-    const saved = localStorage.getItem('odonto_student');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_STUDENT;
-      }
-    }
-    return INITIAL_STUDENT;
+    return getSyncStorage<StudentProfile>('student_profile', INITIAL_STUDENT);
   });
 
   const [duplaPartner, setDuplaPartner] = useState<DuplaPartner>(() => {
-    const saved = localStorage.getItem('odonto_dupla');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_DUPLA;
-      }
-    }
-    return INITIAL_DUPLA;
+    return getSyncStorage<DuplaPartner>('dupla_partner', INITIAL_DUPLA);
   });
 
-  // Collections state
-  const [patients, setPatients] = useState<Patient[]>(INITIAL_PATIENTS);
-  const [appointments, setAppointments] = useState<Appointment[]>(INITIAL_APPOINTMENTS);
-  const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_CHAT_MESSAGES);
-  const [disciplines, setDisciplines] = useState<DisciplineConfig[]>(INITIAL_DISCIPLINES);
-  const [notices, setNotices] = useState<AcademicNotice[]>(INITIAL_NOTICES);
+  // Collections state initialized synchronously from local storage
+  const [patients, setPatients] = useState<Patient[]>(() => {
+    return cleanDummy(getSyncStorage<Patient[]>('patients', INITIAL_PATIENTS));
+  });
+  const [appointments, setAppointments] = useState<Appointment[]>(() => {
+    return cleanDummy(getSyncStorage<Appointment[]>('appointments', INITIAL_APPOINTMENTS));
+  });
+  const [tasks, setTasks] = useState<TaskItem[]>(() => {
+    return cleanDummy(getSyncStorage<TaskItem[]>('tasks', INITIAL_TASKS));
+  });
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    return cleanDummy(getSyncStorage<ChatMessage[]>('chat_messages', INITIAL_CHAT_MESSAGES));
+  });
+  const [disciplines, setDisciplines] = useState<DisciplineConfig[]>(() => {
+    return getSyncStorage<DisciplineConfig[]>('disciplines', INITIAL_DISCIPLINES);
+  });
+  const [notices, setNotices] = useState<AcademicNotice[]>(() => {
+    return cleanDummy(getSyncStorage<AcademicNotice[]>('notices', INITIAL_NOTICES));
+  });
+  const [studySubjects, setStudySubjects] = useState<StudySubject[]>(() => {
+    return cleanDummy(getSyncStorage<StudySubject[]>('study_subjects', INITIAL_STUDY_SUBJECTS));
+  });
+  const [examSchedules, setExamSchedules] = useState<ExamSchedule[]>(() => {
+    return cleanDummy(getSyncStorage<ExamSchedule[]>('exam_schedules', INITIAL_EXAM_SCHEDULES));
+  });
+  const [googleResources, setGoogleResources] = useState<GoogleResourceLink[]>(() => {
+    return cleanDummy(getSyncStorage<GoogleResourceLink[]>('google_resources', INITIAL_GOOGLE_RESOURCES));
+  });
+
+  // Ref to prevent premature saving before initial storage check
+  const isLoadedRef = useRef<boolean>(false);
 
   // Toast Helper
   const showToast = (text: string, type: 'success' | 'info' | 'warning' | 'error' = 'success') => {
@@ -248,32 +367,274 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   };
 
-  // Load from Storage on boot
+  // Load from Storage & Cloud on boot (Priority: Merge Firestore + Server + Local Storage)
   useEffect(() => {
     async function loadData() {
+      isInternalChange.current = true;
       try {
-        const storedPatients = await getFromStorage<Patient[]>('patients', INITIAL_PATIENTS);
-        const storedAppointments = await getFromStorage<Appointment[]>('appointments', INITIAL_APPOINTMENTS);
-        const storedTasks = await getFromStorage<TaskItem[]>('tasks', INITIAL_TASKS);
-        const storedChat = await getFromStorage<ChatMessage[]>('chat_messages', INITIAL_CHAT_MESSAGES);
-        const storedDisciplines = await getFromStorage<DisciplineConfig[]>('disciplines', INITIAL_DISCIPLINES);
-        const storedNotices = await getFromStorage<AcademicNotice[]>('notices', INITIAL_NOTICES);
-        const storedStudent = await getFromStorage<StudentProfile>('student_profile', INITIAL_STUDENT);
-        const storedDupla = await getFromStorage<DuplaPartner>('dupla_partner', INITIAL_DUPLA);
+        // Read local storage as fast cache
+        const storedPatients = await getFromStorage<Patient[] | null>('patients', null);
+        const storedAppointments = await getFromStorage<Appointment[] | null>('appointments', null);
+        const storedTasks = await getFromStorage<TaskItem[] | null>('tasks', null);
+        const storedChat = await getFromStorage<ChatMessage[] | null>('chat_messages', null);
+        const storedDisciplines = await getFromStorage<DisciplineConfig[] | null>('disciplines', null);
+        const storedNotices = await getFromStorage<AcademicNotice[] | null>('notices', null);
+        const storedStudies = await getFromStorage<StudySubject[] | null>('study_subjects', null);
+        const storedExams = await getFromStorage<ExamSchedule[] | null>('exam_schedules', null);
+        const storedResources = await getFromStorage<GoogleResourceLink[] | null>('google_resources', null);
+        const storedStudent = await getFromStorage<StudentProfile | null>('student_profile', null);
+        const storedDupla = await getFromStorage<DuplaPartner | null>('dupla_partner', null);
 
-        setPatients(storedPatients);
-        setAppointments(storedAppointments);
-        setTasks(storedTasks);
-        setChatMessages(storedChat);
-        setDisciplines(storedDisciplines);
-        setNotices(storedNotices);
-        if (storedStudent) setCurrentStudent(storedStudent);
-        if (storedDupla) setDuplaPartner(storedDupla);
+        let cloudData: any = null;
+        let sourceName = '';
+
+        // 1. Check Firestore first (permanent across all devices)
+        const db = getFirebaseDB();
+        if (db) {
+          try {
+            const docRef = doc(db, 'odonto_clinic', 'main_workspace');
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+              const data = snap.data();
+              if (data && (data.patients || data.student || data.dupla || data.appointments)) {
+                cloudData = data;
+                sourceName = 'Firebase';
+              }
+            }
+          } catch (e) {
+            console.warn('[Firestore] Boot fetch warning:', e);
+          }
+        }
+
+        // 2. If not found in Firestore, check Server persistent store
+        if (!cloudData) {
+          try {
+            const { state: cloudState, connectedDevices } = await fetchCloudState();
+            if (connectedDevices) setConnectedDevicesCount(connectedDevices);
+            if (cloudState && (cloudState.patients || cloudState.student || cloudState.dupla || cloudState.appointments)) {
+              cloudData = cloudState;
+              sourceName = 'Nuvem';
+            }
+          } catch (e) {
+            console.warn('[CloudSync] Boot fetch warning:', e);
+          }
+        }
+
+        // 3. Reconcile and Merge: NEVER drop locally stored records
+        const basePatients = storedPatients && storedPatients.length > 0 ? storedPatients : INITIAL_PATIENTS;
+        const mergedPatients = mergeById(basePatients, cloudData?.patients || []);
+        setPatients(mergedPatients);
+        saveToStorage('patients', mergedPatients);
+
+        const baseAppointments = storedAppointments && storedAppointments.length > 0 ? storedAppointments : INITIAL_APPOINTMENTS;
+        const mergedAppointments = mergeById(baseAppointments, cloudData?.appointments || []);
+        setAppointments(mergedAppointments);
+        saveToStorage('appointments', mergedAppointments);
+
+        const baseTasks = storedTasks && storedTasks.length > 0 ? storedTasks : INITIAL_TASKS;
+        const mergedTasks = mergeById(baseTasks, cloudData?.tasks || []);
+        setTasks(mergedTasks);
+        saveToStorage('tasks', mergedTasks);
+
+        const baseChat = cleanDummy(storedChat && storedChat.length > 0 ? storedChat : INITIAL_CHAT_MESSAGES);
+        const mergedChat = mergeById(baseChat, cloudData?.chatMessages || []);
+        setChatMessages(mergedChat);
+        saveToStorage('chat_messages', mergedChat);
+
+        const baseDisciplines = storedDisciplines && storedDisciplines.length > 0 ? storedDisciplines : INITIAL_DISCIPLINES;
+        const mergedDisciplines = mergeById(baseDisciplines, cloudData?.disciplines || []);
+        setDisciplines(mergedDisciplines);
+        saveToStorage('disciplines', mergedDisciplines);
+
+        const baseNotices = cleanDummy(storedNotices && storedNotices.length > 0 ? storedNotices : INITIAL_NOTICES);
+        const mergedNotices = mergeById(baseNotices, cloudData?.notices || []);
+        setNotices(mergedNotices);
+        saveToStorage('notices', mergedNotices);
+
+        const baseStudies = storedStudies && storedStudies.length > 0 ? storedStudies : INITIAL_STUDY_SUBJECTS;
+        const mergedStudies = mergeById(baseStudies, cloudData?.studySubjects || []);
+        setStudySubjects(mergedStudies);
+        saveToStorage('study_subjects', mergedStudies);
+
+        const baseExams = storedExams && storedExams.length > 0 ? storedExams : INITIAL_EXAM_SCHEDULES;
+        const mergedExams = mergeById(baseExams, cloudData?.examSchedules || []);
+        setExamSchedules(mergedExams);
+        saveToStorage('exam_schedules', mergedExams);
+
+        const baseResources = storedResources && storedResources.length > 0 ? storedResources : INITIAL_GOOGLE_RESOURCES;
+        const mergedResources = mergeById(baseResources, cloudData?.googleResources || []);
+        setGoogleResources(mergedResources);
+        saveToStorage('google_resources', mergedResources);
+
+        if (cloudData?.student || storedStudent) {
+          const finalStudent = cloudData?.student || storedStudent;
+          setCurrentStudent(finalStudent);
+          saveToStorage('student_profile', finalStudent);
+        }
+
+        if (cloudData?.dupla || storedDupla) {
+          const finalDupla = cloudData?.dupla || storedDupla;
+          setDuplaPartner(finalDupla);
+          saveToStorage('dupla_partner', finalDupla);
+        }
+
+        if (cloudData?.settings) {
+          if (typeof cloudData.settings.darkMode === 'boolean') setDarkMode(cloudData.settings.darkMode);
+          if (typeof cloudData.settings.privacyMode === 'boolean') setPrivacyMode(cloudData.settings.privacyMode);
+          if (cloudData.settings.userPin) setUserPinState(cloudData.settings.userPin);
+        }
+
+        // Push reconciled state back to server and firestore to ensure all backends match
+        const fullPayload = {
+          patients: mergedPatients,
+          appointments: mergedAppointments,
+          tasks: mergedTasks,
+          chatMessages: mergedChat,
+          disciplines: mergedDisciplines,
+          notices: mergedNotices,
+          studySubjects: mergedStudies,
+          examSchedules: mergedExams,
+          googleResources: mergedResources,
+          student: cloudData?.student || storedStudent || INITIAL_STUDENT,
+          dupla: cloudData?.dupla || storedDupla || INITIAL_DUPLA,
+          settings: { darkMode, privacyMode, userPin },
+          updatedAt: Date.now()
+        };
+
+        pushCloudState(fullPayload);
+        if (db) {
+          try {
+            const docRef = doc(db, 'odonto_clinic', 'main_workspace');
+            setDoc(docRef, { ...fullPayload, updatedAt: new Date().toISOString() }, { merge: true });
+          } catch {
+            // ignore
+          }
+        }
+
+        const now = new Date();
+        setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (${sourceName || 'Local'})`);
+        setSyncStatus('synced');
       } catch (err) {
-        console.warn('Error loading from storage:', err);
+        console.warn('Error loading from storage / cloud:', err);
+      } finally {
+        isLoadedRef.current = true;
+        setTimeout(() => {
+          isInternalChange.current = false;
+        }, 200);
       }
     }
     loadData();
+  }, []);
+
+  // Real-Time Cloud SSE Listener (Multi-Device Sync Celular ⇄ Computador)
+  useEffect(() => {
+    const unsubscribe = subscribeToCloudEvents({
+      onInit: (state, count) => {
+        if (count) setConnectedDevicesCount(count);
+        if (state) {
+          isInternalChange.current = true;
+          if (Array.isArray(state.patients)) {
+            const clean = cleanDummy(state.patients);
+            setPatients(clean);
+            saveToStorage('patients', clean);
+          }
+          if (Array.isArray(state.appointments)) {
+            const clean = cleanDummy(state.appointments);
+            setAppointments(clean);
+            saveToStorage('appointments', clean);
+          }
+          if (Array.isArray(state.tasks)) {
+            const clean = cleanDummy(state.tasks);
+            setTasks(clean);
+            saveToStorage('tasks', clean);
+          }
+          if (Array.isArray(state.chatMessages)) {
+            const clean = cleanDummy(state.chatMessages);
+            setChatMessages(clean);
+            saveToStorage('chat_messages', clean);
+          }
+          if (Array.isArray(state.disciplines) && state.disciplines.length > 0) {
+            const clean = cleanDummy(state.disciplines);
+            setDisciplines(clean);
+            saveToStorage('disciplines', clean);
+          }
+          if (Array.isArray(state.notices)) {
+            const clean = cleanDummy(state.notices);
+            setNotices(clean);
+            saveToStorage('notices', clean);
+          }
+          if (state.student) setCurrentStudent(state.student);
+          if (state.dupla) setDuplaPartner(state.dupla);
+          setSyncStatus('synced');
+          const now = new Date();
+          setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Nuvem)`);
+          setTimeout(() => {
+            isInternalChange.current = false;
+          }, 150);
+        }
+      },
+      onStateUpdate: (state, source) => {
+        if (!state) return;
+        isInternalChange.current = true;
+        if (Array.isArray(state.patients)) {
+          const clean = cleanDummy(state.patients);
+          setPatients(clean);
+          saveToStorage('patients', clean);
+        }
+        if (Array.isArray(state.appointments)) {
+          const clean = cleanDummy(state.appointments);
+          setAppointments(clean);
+          saveToStorage('appointments', clean);
+        }
+        if (Array.isArray(state.tasks)) {
+          const clean = cleanDummy(state.tasks);
+          setTasks(clean);
+          saveToStorage('tasks', clean);
+        }
+        if (Array.isArray(state.chatMessages)) {
+          const clean = cleanDummy(state.chatMessages);
+          setChatMessages(clean);
+          saveToStorage('chat_messages', clean);
+        }
+        if (Array.isArray(state.disciplines) && state.disciplines.length > 0) {
+          const clean = cleanDummy(state.disciplines);
+          setDisciplines(clean);
+          saveToStorage('disciplines', clean);
+        }
+        if (Array.isArray(state.notices)) {
+          const clean = cleanDummy(state.notices);
+          setNotices(clean);
+          saveToStorage('notices', clean);
+        }
+        if (state.student) setCurrentStudent(state.student);
+        if (state.dupla) setDuplaPartner(state.dupla);
+
+        setSyncStatus('synced');
+        const now = new Date();
+        setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (${source || 'Nuvem'})`);
+        setTimeout(() => {
+          isInternalChange.current = false;
+        }, 150);
+      },
+      onNewChatMessage: (msg) => {
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          const updated = [...prev, msg];
+          saveToStorage('chat_messages', updated);
+          return updated;
+        });
+      },
+      onPresence: (count) => {
+        setConnectedDevicesCount(count);
+      },
+      onConnectionChange: (connected) => {
+        setIsCloudConnected(connected);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Firebase state
@@ -283,6 +644,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Firestore DB ref
   const dbRef = useRef<any>(null);
   const isInternalChange = useRef<boolean>(false);
+  const syncDebounceTimer = useRef<any>(null);
+
+  // Helper to push state to Cloud Server (with debounce)
+  const pushToCloudState = useCallback(() => {
+    if (isInternalChange.current || !isLoadedRef.current) return;
+    if (syncDebounceTimer.current) {
+      clearTimeout(syncDebounceTimer.current);
+    }
+    syncDebounceTimer.current = setTimeout(() => {
+      setSyncStatus('syncing');
+      pushCloudState({
+        patients,
+        appointments,
+        tasks,
+        chatMessages,
+        disciplines,
+        notices,
+        studySubjects,
+        examSchedules,
+        googleResources,
+        student: currentStudent,
+        dupla: duplaPartner,
+        settings: {
+          darkMode,
+          privacyMode,
+          userPin
+        },
+        updatedAt: Date.now()
+      }).then((ok) => {
+        if (ok) {
+          setSyncStatus('synced');
+          const now = new Date();
+          setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`);
+        }
+      });
+    }, 400);
+  }, [patients, appointments, tasks, chatMessages, disciplines, notices, studySubjects, examSchedules, googleResources, currentStudent, duplaPartner, darkMode, privacyMode, userPin]);
 
   // Initialize Firebase DB on mount or config change
   useEffect(() => {
@@ -291,7 +689,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsFirebaseActive(!!db);
   }, [firebaseCustomConfig]);
 
-  // Firestore Real-Time Listeners (Sync from Cloud -> Local)
+  // Firestore Real-Time Listeners (Sync from Firebase)
   useEffect(() => {
     const db = dbRef.current || getFirebaseDB();
     if (!db) return;
@@ -302,21 +700,62 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const unsubscribe = onSnapshot(docRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          isInternalChange.current = true;
-          if (data.patients) setPatients(data.patients);
-          if (data.appointments) setAppointments(data.appointments);
-          if (data.tasks) setTasks(data.tasks);
-          if (data.chatMessages) setChatMessages(data.chatMessages);
-          if (data.disciplines) setDisciplines(data.disciplines);
-          if (data.notices) setNotices(data.notices);
-          if (data.student) setCurrentStudent(data.student);
-          if (data.dupla) setDuplaPartner(data.dupla);
-          setSyncStatus('synced');
-          const now = new Date();
-          setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
-          setTimeout(() => {
-            isInternalChange.current = false;
-          }, 100);
+          if (data) {
+            isInternalChange.current = true;
+            if (Array.isArray(data.patients)) {
+              const clean = cleanDummy(data.patients);
+              setPatients(clean);
+              saveToStorage('patients', clean);
+            }
+            if (Array.isArray(data.appointments)) {
+              const clean = cleanDummy(data.appointments);
+              setAppointments(clean);
+              saveToStorage('appointments', clean);
+            }
+            if (Array.isArray(data.tasks)) {
+              const clean = cleanDummy(data.tasks);
+              setTasks(clean);
+              saveToStorage('tasks', clean);
+            }
+            if (Array.isArray(data.chatMessages)) {
+              const clean = cleanDummy(data.chatMessages);
+              setChatMessages(clean);
+              saveToStorage('chat_messages', clean);
+            }
+            if (Array.isArray(data.disciplines) && data.disciplines.length > 0) {
+              const clean = cleanDummy(data.disciplines);
+              setDisciplines(clean);
+              saveToStorage('disciplines', clean);
+            }
+            if (Array.isArray(data.notices)) {
+              const clean = cleanDummy(data.notices);
+              setNotices(clean);
+              saveToStorage('notices', clean);
+            }
+            if (Array.isArray(data.studySubjects)) {
+              const clean = cleanDummy(data.studySubjects);
+              setStudySubjects(clean);
+              saveToStorage('study_subjects', clean);
+            }
+            if (Array.isArray(data.examSchedules)) {
+              const clean = cleanDummy(data.examSchedules);
+              setExamSchedules(clean);
+              saveToStorage('exam_schedules', clean);
+            }
+            if (Array.isArray(data.googleResources)) {
+              const clean = cleanDummy(data.googleResources);
+              setGoogleResources(clean);
+              saveToStorage('google_resources', clean);
+            }
+            if (data.student) setCurrentStudent(data.student);
+            if (data.dupla) setDuplaPartner(data.dupla);
+            setSyncStatus('synced');
+            const now = new Date();
+            setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
+            setTimeout(() => {
+              isInternalChange.current = false;
+            }, 150);
+          }
         }
       }, (err) => {
         console.warn('Firestore snapshot error:', err);
@@ -343,6 +782,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (action === 'update_chat' && payload) setChatMessages(payload);
       if (action === 'update_notices' && payload) setNotices(payload);
       if (action === 'update_disciplines' && payload) setDisciplines(payload);
+      if (action === 'update_studies' && payload) setStudySubjects(payload);
+      if (action === 'update_exams' && payload) setExamSchedules(payload);
+      if (action === 'update_resources' && payload) setGoogleResources(payload);
       if (action === 'update_student' && payload) setCurrentStudent(payload);
       if (action === 'update_dupla' && payload) setDuplaPartner(payload);
 
@@ -361,7 +803,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Sync to Firebase Cloud Helper
   const pushToFirestore = async () => {
     const db = dbRef.current || getFirebaseDB();
-    if (!db || isInternalChange.current) return;
+    if (!db || isInternalChange.current || !isLoadedRef.current) return;
 
     try {
       setSyncStatus('syncing');
@@ -373,8 +815,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         chatMessages,
         disciplines,
         notices,
+        studySubjects,
+        examSchedules,
+        googleResources,
         student: currentStudent,
         dupla: duplaPartner,
+        settings: {
+          darkMode,
+          privacyMode,
+          userPin
+        },
         updatedAt: new Date().toISOString()
       }, { merge: true });
       setSyncStatus('synced');
@@ -388,83 +838,165 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Auto-Save when state changes
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('patients', patients);
     if (!isInternalChange.current) {
       broadcastStateChange('update_patients', patients);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [patients]);
+  }, [patients, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('appointments', appointments);
     if (!isInternalChange.current) {
       broadcastStateChange('update_appointments', appointments);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [appointments]);
+  }, [appointments, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('tasks', tasks);
     if (!isInternalChange.current) {
       broadcastStateChange('update_tasks', tasks);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [tasks]);
+  }, [tasks, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('chat_messages', chatMessages);
     if (!isInternalChange.current) {
       broadcastStateChange('update_chat', chatMessages);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [chatMessages]);
+  }, [chatMessages, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('disciplines', disciplines);
     if (!isInternalChange.current) {
       broadcastStateChange('update_disciplines', disciplines);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [disciplines]);
+  }, [disciplines, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('notices', notices);
     if (!isInternalChange.current) {
       broadcastStateChange('update_notices', notices);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [notices]);
+  }, [notices, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('student_profile', currentStudent);
-    localStorage.setItem('odonto_student', JSON.stringify(currentStudent));
     if (!isInternalChange.current) {
       broadcastStateChange('update_student', currentStudent);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [currentStudent]);
+  }, [currentStudent, pushToCloudState]);
 
   useEffect(() => {
+    if (!isLoadedRef.current) return;
     saveToStorage('dupla_partner', duplaPartner);
-    localStorage.setItem('odonto_dupla', JSON.stringify(duplaPartner));
     if (!isInternalChange.current) {
       broadcastStateChange('update_dupla', duplaPartner);
+      pushToCloudState();
       pushToFirestore();
     }
-  }, [duplaPartner]);
+  }, [duplaPartner, pushToCloudState]);
 
-  // Cloud Sync simulation / trigger
+  useEffect(() => {
+    if (!isLoadedRef.current) return;
+    saveToStorage('study_subjects', studySubjects);
+    if (!isInternalChange.current) {
+      broadcastStateChange('update_studies', studySubjects);
+      pushToCloudState();
+      pushToFirestore();
+    }
+  }, [studySubjects, pushToCloudState]);
+
+  useEffect(() => {
+    if (!isLoadedRef.current) return;
+    saveToStorage('exam_schedules', examSchedules);
+    if (!isInternalChange.current) {
+      broadcastStateChange('update_exams', examSchedules);
+      pushToCloudState();
+      pushToFirestore();
+    }
+  }, [examSchedules, pushToCloudState]);
+
+  useEffect(() => {
+    if (!isLoadedRef.current) return;
+    saveToStorage('google_resources', googleResources);
+    if (!isInternalChange.current) {
+      broadcastStateChange('update_resources', googleResources);
+      pushToCloudState();
+      pushToFirestore();
+    }
+  }, [googleResources, pushToCloudState]);
+
+  useEffect(() => {
+    if (!isLoadedRef.current) return;
+    if (!isInternalChange.current) {
+      pushToCloudState();
+      pushToFirestore();
+    }
+  }, [darkMode, privacyMode, userPin, pushToCloudState]);
+
+  // Cloud Sync trigger
   const triggerCloudSync = async () => {
     setIsSyncing(true);
     setSyncStatus('syncing');
+    await pushCloudState({
+      patients,
+      appointments,
+      tasks,
+      chatMessages,
+      disciplines,
+      notices,
+      student: currentStudent,
+      dupla: duplaPartner,
+      settings: {
+        darkMode,
+        privacyMode,
+        userPin
+      },
+      updatedAt: Date.now()
+    });
     await pushToFirestore();
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    const { state: latestCloudState } = await fetchCloudState();
+    if (latestCloudState && latestCloudState.patients) {
+      isInternalChange.current = true;
+      setPatients(latestCloudState.patients);
+      if (latestCloudState.appointments) setAppointments(latestCloudState.appointments);
+      if (latestCloudState.tasks) setTasks(latestCloudState.tasks);
+      if (latestCloudState.chatMessages) setChatMessages(latestCloudState.chatMessages);
+      if (latestCloudState.disciplines) setDisciplines(latestCloudState.disciplines);
+      if (latestCloudState.notices) setNotices(latestCloudState.notices);
+      if (latestCloudState.student) setCurrentStudent(latestCloudState.student);
+      if (latestCloudState.dupla) setDuplaPartner(latestCloudState.dupla);
+      setTimeout(() => {
+        isInternalChange.current = false;
+      }, 150);
+    }
     setIsSyncing(false);
     setSyncStatus('synced');
     const now = new Date();
     const timeStr = `Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
     setLastSyncedTime(timeStr);
-    showToast('Dados clínicos e radiografias sincronizados em tempo real com o Firebase e nuvem!', 'success');
+    showToast('Dados clínicos e configurações sincronizados com sucesso na Nuvem (Celular ⇄ PC)!', 'success');
   };
 
   const triggerDriveSync = triggerCloudSync;
@@ -528,28 +1060,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    setPatients((prev) => [newPatient, ...prev]);
+    setPatients((prev) => {
+      const updated = [newPatient, ...prev.filter(p => p.id !== id)];
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast(`Paciente ${newPatient.name} cadastrado com sucesso!`);
     return id;
   };
 
   const updatePatient = (id: string, updates: Partial<Patient>) => {
-    setPatients((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p))
-    );
+    setPatients((prev) => {
+      const updated = prev.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p));
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast('Prontuário do paciente atualizado.');
   };
 
   const deletePatient = (id: string) => {
-    setPatients((prev) => prev.filter((p) => p.id !== id));
-    setAppointments((prev) => prev.filter((a) => a.patientId !== id));
+    setPatients((prev) => {
+      const updated = prev.filter((p) => p.id !== id);
+      saveToStorage('patients', updated);
+      return updated;
+    });
+    setAppointments((prev) => {
+      const updated = prev.filter((a) => a.patientId !== id);
+      saveToStorage('appointments', updated);
+      return updated;
+    });
     if (selectedPatientId === id) setSelectedPatientId(null);
     showToast('Paciente removido do sistema.', 'info');
   };
 
   const updateOdontogramTooth = (patientId: string, toothNumber: number, toothData: ToothData) => {
-    setPatients((prev) =>
-      prev.map((p) => {
+    setPatients((prev) => {
+      const updated = prev.map((p) => {
         if (p.id !== patientId) return p;
         const newOdontogram = {
           ...p.odontogram,
@@ -560,8 +1106,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           odontogram: newOdontogram,
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast(`Odontograma atualizado para o dente ${toothNumber}.`);
   };
 
@@ -572,36 +1120,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       createdAt: new Date().toISOString()
     };
 
-    setPatients((prev) =>
-      prev.map((p) => {
+    setPatients((prev) => {
+      const updated = prev.map((p) => {
         if (p.id !== patientId) return p;
         return {
           ...p,
           evolutions: [evo, ...p.evolutions],
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      saveToStorage('patients', updated);
+      return updated;
+    });
 
     // Also update discipline progress
-    setDisciplines((prev) =>
-      prev.map((d) => (d.name === evolutionData.discipline ? { ...d, completedCount: d.completedCount + 1 } : d))
-    );
+    setDisciplines((prev) => {
+      const updated = prev.map((d) => (d.name === evolutionData.discipline ? { ...d, completedCount: d.completedCount + 1 } : d));
+      saveToStorage('disciplines', updated);
+      return updated;
+    });
 
     showToast('Evolução clínica registrada no prontuário!');
   };
 
   const deleteClinicalEvolution = (patientId: string, evolutionId: string) => {
-    setPatients((prev) =>
-      prev.map((p) => {
+    setPatients((prev) => {
+      const updated = prev.map((p) => {
         if (p.id !== patientId) return p;
         return {
           ...p,
           evolutions: p.evolutions.filter((evo) => evo.id !== evolutionId),
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast('Evolução clínica excluída.', 'info');
   };
 
@@ -611,30 +1165,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: `exam_${Date.now()}`
     };
 
-    setPatients((prev) =>
-      prev.map((p) => {
+    setPatients((prev) => {
+      const updated = prev.map((p) => {
         if (p.id !== patientId) return p;
         return {
           ...p,
           exams: [exam, ...p.exams],
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast('Exame radiográfico / foto anexada com sucesso!');
   };
 
   const deletePatientExam = (patientId: string, examId: string) => {
-    setPatients((prev) =>
-      prev.map((p) => {
+    setPatients((prev) => {
+      const updated = prev.map((p) => {
         if (p.id !== patientId) return p;
         return {
           ...p,
           exams: p.exams.filter((e) => e.id !== examId),
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      saveToStorage('patients', updated);
+      return updated;
+    });
     showToast('Exame removido da galeria.', 'info');
   };
 
@@ -644,19 +1202,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...aptData,
       id: `apt_${Date.now()}`
     };
-    setAppointments((prev) => [...prev, newApt].sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime)));
+    setAppointments((prev) => {
+      const updated = [...prev, newApt].sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+      saveToStorage('appointments', updated);
+      return updated;
+    });
     showToast(`Consulta agendada para ${newApt.patientName}!`);
   };
 
   const updateAppointment = (id: string, updates: Partial<Appointment>) => {
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, ...updates } : a))
-    );
+    setAppointments((prev) => {
+      const updated = prev.map((a) => (a.id === id ? { ...a, ...updates } : a));
+      saveToStorage('appointments', updated);
+      return updated;
+    });
     showToast('Agendamento atualizado.');
   };
 
   const deleteAppointment = (id: string) => {
-    setAppointments((prev) => prev.filter((a) => a.id !== id));
+    setAppointments((prev) => {
+      const updated = prev.filter((a) => a.id !== id);
+      saveToStorage('appointments', updated);
+      return updated;
+    });
     showToast('Agendamento excluído.', 'info');
   };
 
@@ -717,21 +1285,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       attachedPatientName: attachedPatient
     };
     setChatMessages((prev) => [...prev, newMsg]);
+    pushChatMessageToCloud(newMsg);
   };
 
-  const sendVoiceMessage = (durationSeconds: number) => {
+  const sendVoiceMessage = (durationSeconds: number, audioUrl?: string, patientTag?: string) => {
     const now = new Date();
     const timeStr = `Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
     const newMsg: ChatMessage = {
       id: `msg_${Date.now()}`,
-      sender: currentStudent.name as any || 'Rafael (Você)',
+      sender: (currentStudent.name as any) || 'Rafael (Você)',
       senderRole: 'Estudante A',
-      content: `🎙️ Áudio da Clínica (${durationSeconds}s)`,
+      content: `🎙️ Mensagem de Voz (${durationSeconds}s)`,
       audioDuration: `0:${durationSeconds < 10 ? '0' : ''}${durationSeconds}`,
+      audioUrl: audioUrl,
+      attachedPatientName: patientTag,
       timestamp: timeStr
     };
     setChatMessages((prev) => [...prev, newMsg]);
-    showToast('Mensagem de áudio enviada para a dupla!');
+    pushChatMessageToCloud(newMsg);
+    showToast('Mensagem de voz enviada para a dupla!');
   };
 
   const deleteChatMessage = (id: string) => {
@@ -773,6 +1345,139 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     showToast('Meta da disciplina atualizada.');
   };
 
+  // Study Actions
+  const addStudySubject = (subject: Omit<StudySubject, 'id' | 'topics'>) => {
+    const newSubj: StudySubject = {
+      ...subject,
+      id: 'subj-' + Date.now(),
+      topics: []
+    };
+    setStudySubjects((prev) => {
+      const updated = [...prev, newSubj];
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+    showToast(`Matéria "${newSubj.name}" adicionada ao plano de estudos!`);
+  };
+
+  const updateStudySubject = (id: string, updates: Partial<StudySubject>) => {
+    setStudySubjects((prev) => {
+      const updated = prev.map((s) => (s.id === id ? { ...s, ...updates } : s));
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+    showToast('Matéria atualizada com sucesso!');
+  };
+
+  const deleteStudySubject = (id: string) => {
+    setStudySubjects((prev) => {
+      const target = prev.find(s => s.id === id);
+      const updated = prev.filter((s) => s.id !== id);
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+    showToast('Matéria removida dos estudos.', 'info');
+  };
+
+  const addStudyTopic = (subjectId: string, topic: Omit<StudyTopic, 'id'>) => {
+    const newTopic: StudyTopic = {
+      ...topic,
+      id: 'top-' + Date.now()
+    };
+    setStudySubjects((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id !== subjectId) return s;
+        return {
+          ...s,
+          topics: [...s.topics, newTopic]
+        };
+      });
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+  };
+
+  const toggleStudyTopic = (subjectId: string, topicId: string) => {
+    setStudySubjects((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id !== subjectId) return s;
+        return {
+          ...s,
+          topics: s.topics.map((t) => (t.id === topicId ? { ...t, completed: !t.completed } : t))
+        };
+      });
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+  };
+
+  const deleteStudyTopic = (subjectId: string, topicId: string) => {
+    setStudySubjects((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id !== subjectId) return s;
+        return {
+          ...s,
+          topics: s.topics.filter((t) => t.id !== topicId)
+        };
+      });
+      saveToStorage('study_subjects', updated);
+      return updated;
+    });
+  };
+
+  const addExamSchedule = (exam: Omit<ExamSchedule, 'id'>) => {
+    const newExam: ExamSchedule = {
+      ...exam,
+      id: 'exam-' + Date.now()
+    };
+    setExamSchedules((prev) => {
+      const updated = [...prev, newExam].sort((a, b) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime());
+      saveToStorage('exam_schedules', updated);
+      return updated;
+    });
+    showToast(`Prova de ${newExam.subject} agendada com sucesso!`);
+  };
+
+  const updateExamSchedule = (id: string, updates: Partial<ExamSchedule>) => {
+    setExamSchedules((prev) => {
+      const updated = prev.map((e) => (e.id === id ? { ...e, ...updates } : e));
+      saveToStorage('exam_schedules', updated);
+      return updated;
+    });
+    showToast('Prova atualizada.');
+  };
+
+  const deleteExamSchedule = (id: string) => {
+    setExamSchedules((prev) => {
+      const updated = prev.filter((e) => e.id !== id);
+      saveToStorage('exam_schedules', updated);
+      return updated;
+    });
+    showToast('Prova removida do cronograma.', 'info');
+  };
+
+  const addGoogleResource = (resource: Omit<GoogleResourceLink, 'id'>) => {
+    const newResource: GoogleResourceLink = {
+      ...resource,
+      id: 'gres-' + Date.now()
+    };
+    setGoogleResources((prev) => {
+      const updated = [...prev, newResource];
+      saveToStorage('google_resources', updated);
+      return updated;
+    });
+    showToast('Atalho do Google salvo!');
+  };
+
+  const deleteGoogleResource = (id: string) => {
+    setGoogleResources((prev) => {
+      const updated = prev.filter((r) => r.id !== id);
+      saveToStorage('google_resources', updated);
+      return updated;
+    });
+    showToast('Atalho removido.', 'info');
+  };
+
   const resetToDefaultData = () => {
     setPatients(INITIAL_PATIENTS);
     setAppointments(INITIAL_APPOINTMENTS);
@@ -780,8 +1485,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setChatMessages(INITIAL_CHAT_MESSAGES);
     setDisciplines(INITIAL_DISCIPLINES);
     setNotices(INITIAL_NOTICES);
+    setStudySubjects(INITIAL_STUDY_SUBJECTS);
+    setExamSchedules(INITIAL_EXAM_SCHEDULES);
+    setGoogleResources(INITIAL_GOOGLE_RESOURCES);
     setCurrentStudent(INITIAL_STUDENT);
     setDuplaPartner(INITIAL_DUPLA);
+
+    pushCloudState({
+      patients: INITIAL_PATIENTS,
+      appointments: INITIAL_APPOINTMENTS,
+      tasks: INITIAL_TASKS,
+      chatMessages: INITIAL_CHAT_MESSAGES,
+      disciplines: INITIAL_DISCIPLINES,
+      notices: INITIAL_NOTICES,
+      student: INITIAL_STUDENT,
+      dupla: INITIAL_DUPLA,
+      updatedAt: Date.now()
+    });
+
     showToast('Dados de demonstração restaurados com sucesso!', 'info');
   };
 
@@ -813,6 +1534,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         triggerCloudSync,
         triggerDriveSync,
         isSyncing,
+        connectedDevicesCount,
+        isCloudConnected,
         isFirebaseActive,
         firebaseCustomConfig,
         updateFirebaseConfig,
@@ -830,6 +1553,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         chatMessages,
         disciplines,
         notices,
+        studySubjects,
+        examSchedules,
+        googleResources,
         addPatient,
         updatePatient,
         deletePatient,
@@ -855,6 +1581,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         markNoticeAsRead,
         updateDiscipline,
         updateDisciplineTarget,
+        addStudySubject,
+        updateStudySubject,
+        deleteStudySubject,
+        addStudyTopic,
+        toggleStudyTopic,
+        deleteStudyTopic,
+        addExamSchedule,
+        updateExamSchedule,
+        deleteExamSchedule,
+        addGoogleResource,
+        deleteGoogleResource,
         resetToDefaultData,
         toastMessage,
         toastType,

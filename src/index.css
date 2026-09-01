@@ -1,1 +1,57 @@
 @import "tailwindcss";
+
+@layer base {
+  html, body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Sharpen and outline small UI typography */
+  .text-\[8px\], .text-\[9px\], .text-\[10px\], .text-\[11px\], .text-xs {
+    letter-spacing: 0.015em;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@keyframes fluid-blob {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(25px, -15px) scale(1.12);
+  }
+  66% {
+    transform: translate(-20px, 18px) scale(0.92);
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+@keyframes fluid-wave {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-fluid-blob {
+  animation: fluid-blob 7s ease-in-out infinite;
+}
+
+.animate-fluid-blob-slow {
+  animation: fluid-blob 11s ease-in-out infinite reverse;
+}
+
+.animate-fluid-gradient {
+  background-size: 240% 240%;
+  animation: fluid-wave 8s ease infinite;
+}
+

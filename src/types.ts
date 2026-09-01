@@ -124,6 +124,7 @@ export interface PatientAnamnese {
 export interface Patient {
   id: string;
   name: string;
+  photoUrl?: string;
   cpf: string;
   rg?: string;
   birthDate: string;
@@ -157,7 +158,47 @@ export interface TaskItem {
   createdAt: string;
 }
 
-export type ViewTab = 'dashboard' | 'patients' | 'calendar' | 'chat' | 'tasks' | 'ai-assistant' | 'settings';
+export type ViewTab = 'dashboard' | 'patients' | 'calendar' | 'tasks' | 'studies' | 'settings';
+
+export interface StudyTopic {
+  id: string;
+  title: string;
+  completed: boolean;
+  priority: 'baixa' | 'media' | 'alta';
+  notes?: string;
+  docLink?: string;
+  estimatedMinutes?: number;
+}
+
+export interface StudySubject {
+  id: string;
+  name: string;
+  color: string;
+  professor?: string;
+  driveFolderUrl?: string;
+  googleDocsUrl?: string;
+  topics: StudyTopic[];
+}
+
+export interface ExamSchedule {
+  id: string;
+  subject: string;
+  examDate: string; // YYYY-MM-DD
+  time?: string; // HH:mm
+  room?: string;
+  topicsCovered?: string;
+  completed: boolean;
+  notes?: string;
+}
+
+export interface GoogleResourceLink {
+  id: string;
+  title: string;
+  type: 'drive' | 'docs' | 'folder';
+  url: string;
+  subjectName?: string;
+  lastAccessed?: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -172,6 +213,7 @@ export interface ChatMessage {
   attachedPatientName?: string;
   patientTag?: string;
   audioDuration?: string;
+  audioUrl?: string;
 }
 
 export interface AcademicNotice {

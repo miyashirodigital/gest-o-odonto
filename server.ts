@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
@@ -219,7 +220,10 @@ async function startServer() {
     }
   });
 
-  // --- Real-time Multi-Device Sync Store (Server-Sent Events & API) ---
+  // --- Persistent Real-time Multi-Device Sync Store (Server-Sent Events & Disk Persistence) ---
+  const DATA_DIR = path.join(process.cwd(), 'data');
+  const DATA_FILE = path.join(DATA_DIR, 'clinic_sync_state.json');
+
   interface ClinicSyncState {
     patients?: any[];
     appointments?: any[];
@@ -229,6 +233,7 @@ async function startServer() {
     notices?: any[];
     student?: any;
     dupla?: any;
+    settings?: any;
     updatedAt: number;
     updatedBy?: string;
   }
@@ -236,6 +241,43 @@ async function startServer() {
   let globalSyncState: ClinicSyncState = {
     updatedAt: Date.now()
   };
+
+  // Load persistent state from disk on server startup
+  function loadPersistedState() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      if (fs.existsSync(DATA_FILE)) {
+        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            globalSyncState = {
+              ...globalSyncState,
+              ...parsed
+            };
+            console.log(`[Sync] Loaded persistent clinic state with ${(globalSyncState.patients || []).length} patients and ${(globalSyncState.appointments || []).length} appointments.`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Sync] Could not read persistent sync file:', err);
+    }
+  }
+
+  function persistStateToDisk() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      fs.writeFileSync(DATA_FILE, JSON.stringify(globalSyncState, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('[Sync] Could not write persistent sync file:', err);
+    }
+  }
+
+  loadPersistedState();
 
   // Connected clients list for SSE
   const sseClients = new Set<express.Response>();
@@ -307,6 +349,8 @@ async function startServer() {
         updatedAt: Date.now()
       };
 
+      persistStateToDisk();
+
       // Broadcast immediately to all connected phones/desktops
       broadcastSSE({
         type: 'state_update',
@@ -329,15 +373,19 @@ async function startServer() {
   app.post('/api/chat/message', (req, res) => {
     try {
       const { message } = req.body;
-      if (!message || !message.text) {
+      if (!message || (!message.content && !message.text)) {
         return res.status(400).json({ error: 'Mensagem inválida' });
       }
 
       const currentMessages = Array.isArray(globalSyncState.chatMessages) ? globalSyncState.chatMessages : [];
-      const updatedMessages = [...currentMessages, message];
+      // avoid duplicates by ID
+      const exists = currentMessages.some((m: any) => m.id === message.id);
+      const updatedMessages = exists ? currentMessages : [...currentMessages, message];
 
       globalSyncState.chatMessages = updatedMessages;
       globalSyncState.updatedAt = Date.now();
+
+      persistStateToDisk();
 
       // Broadcast to all clients instantly
       broadcastSSE({

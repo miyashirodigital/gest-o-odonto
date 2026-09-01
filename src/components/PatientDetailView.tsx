@@ -7,7 +7,6 @@ import { ExamUploadModal } from './ExamUploadModal';
 import { RadiographViewerModal } from './RadiographViewerModal';
 import { WhatsAppModal } from './WhatsAppModal';
 import { PatientModal } from './PatientModal';
-import { exportPatientClinicalRecordPDF } from '../utils/pdfGenerator';
 import { 
   ArrowLeft, 
   FileText, 
@@ -15,7 +14,6 @@ import {
   Camera, 
   Calendar, 
   MessageSquare, 
-  Download, 
   Edit3, 
   AlertTriangle, 
   ShieldAlert, 
@@ -27,7 +25,10 @@ import {
   Trash2,
   Lock,
   Eye,
-  Award
+  Maximize2,
+  ChevronRight,
+  Smartphone,
+  RotateCw
 } from 'lucide-react';
 
 interface PatientDetailViewProps {
@@ -37,14 +38,34 @@ interface PatientDetailViewProps {
 }
 
 export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, onBack, onOpenAppointmentModal }) => {
-  const { updateOdontogramTooth, deletePatientExam, deleteClinicalEvolution, privacyMode, showToast } = useApp();
+  const { updateOdontogramTooth, deletePatientExam, deleteClinicalEvolution, privacyMode } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'odontograma' | 'evolucoes' | 'galeria' | 'anamnese' | 'documentos'>('odontograma');
+  const [activeTab, setActiveTab] = useState<'odontograma' | 'evolucoes' | 'galeria' | 'anamnese'>('odontograma');
   const [showEvolutionModal, setShowEvolutionModal] = useState<boolean>(false);
   const [showExamUploadModal, setShowExamUploadModal] = useState<boolean>(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState<boolean>(false);
   const [showEditPatientModal, setShowEditPatientModal] = useState<boolean>(false);
+  const [showOdontogramModal, setShowOdontogramModal] = useState<boolean>(false);
   const [activeViewingExam, setActiveViewingExam] = useState<RadiographExam | null>(null);
+
+  const getActiveAllergies = (allergies?: string[]): string[] => {
+    if (!allergies || !Array.isArray(allergies)) return [];
+    return allergies.filter(a => {
+      const clean = a.trim().toLowerCase();
+      return clean && 
+        clean !== 'nenhuma' && 
+        clean !== 'nenhum' && 
+        clean !== 'não' && 
+        clean !== 'nao' && 
+        clean !== 'nega' && 
+        clean !== 'não relatada' &&
+        clean !== 'não possui' &&
+        clean !== 'sem alergias' &&
+        clean !== 'sem alergia';
+    });
+  };
+
+  const activeAllergies = getActiveAllergies(patient.anamnese.allergies);
 
   const maskValue = (val: string) => {
     if (!privacyMode) return val;
@@ -63,10 +84,9 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
     updateOdontogramTooth(patient.id, toothNum, toothData);
   };
 
-  const handleExportPDF = () => {
-    exportPatientClinicalRecordPDF(patient);
-    showToast('Prontuário completo exportado em PDF!');
-  };
+  const affectedTeeth = Object.values(patient.odontogram || {}).filter(
+    t => t.conditions.length > 0 || t.generalCondition || t.notes
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
@@ -90,13 +110,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
           </button>
           <button
             type="button"
-            onClick={handleExportPDF}
-            className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-xs flex items-center gap-1.5"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-600" /> Exportar Prontuário (PDF)
-          </button>
-          <button
-            type="button"
             onClick={() => setShowEditPatientModal(true)}
             className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50"
             title="Editar cadastro"
@@ -113,9 +126,17 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-bold text-lg flex items-center justify-center shadow-md shadow-emerald-700/20 shrink-0">
-              {patient.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
-            </div>
+            {patient.photoUrl ? (
+              <img
+                src={patient.photoUrl}
+                alt={patient.name}
+                className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-500 shadow-md shadow-emerald-700/10 shrink-0"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-bold text-lg flex items-center justify-center shadow-md shadow-emerald-700/20 shrink-0">
+                {patient.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
+              </div>
+            )}
 
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -170,8 +191,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
           </div>
         </div>
 
-        {/* High Alert Banner if Patient has Allergies or Critical Medical Alert */}
-        {patient.anamnese.allergies && patient.anamnese.allergies.length > 0 && (
+        {/* High Alert Banner ONLY if Patient actually has Allergies */}
+        {activeAllergies.length > 0 && (
           <div className="mt-4 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/80 flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0">
               <ShieldAlert className="w-4 h-4" />
@@ -180,20 +201,19 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
               <strong className="font-bold uppercase tracking-wider block text-[11px] text-rose-700 dark:text-rose-400">
                 Alerta Médico / Alergia Importante:
               </strong>
-              {patient.anamnese.allergies.join(', ')}
+              {activeAllergies.join(', ')}
             </div>
           </div>
         )}
       </div>
 
-      {/* Internal Navigation Tabs */}
+      {/* Internal Navigation Tabs (Cleaned, without PDF/Terms) */}
       <div className="flex border-b border-emerald-100 dark:border-slate-800 overflow-x-auto text-xs font-semibold gap-2 pb-1">
         {[
           { id: 'odontograma', label: 'Odontograma Interativo', icon: Sparkles },
           { id: 'evolucoes', label: `Evolução Clínica (${patient.evolutions.length})`, icon: FileText },
           { id: 'galeria', label: `Galeria & Radiografias (${patient.exams.length})`, icon: Camera },
-          { id: 'anamnese', label: 'Anamnese & Histórico Médico', icon: Heart },
-          { id: 'documentos', label: 'Termos & Documentos PDF', icon: Award }
+          { id: 'anamnese', label: 'Anamnese & Histórico Médico', icon: Heart }
         ].map(tab => {
           const Icon = tab.icon;
           return (
@@ -214,13 +234,151 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
         })}
       </div>
 
-      {/* Tab 1: Odontograma */}
+      {/* Tab 1: Odontograma - Summary card with direct full-screen access button */}
       {activeTab === 'odontograma' && (
         <div className="space-y-4">
-          <Odontogram
-            odontogram={patient.odontogram}
-            onToothUpdate={handleToothUpdate}
-          />
+          {/* Main Action Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-emerald-100/80 dark:border-slate-800 p-5 md:p-6 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                Odontograma Anatômico Interativo 2D
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {affectedTeeth.length > 0
+                  ? `${affectedTeeth.length} dente(s) com anotações e procedimentos registrados`
+                  : 'Nenhum dente com patologia registrada. Todos os elementos íntegros/hígidos.'}
+              </p>
+              <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold pt-1">
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>No celular, vire a tela na horizontal (paisagem) para ver todos os dentes com perfeição.</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowOdontogramModal(true)}
+              className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-200/50 dark:shadow-none flex items-center justify-center gap-2 transition-transform active:scale-95 shrink-0"
+            >
+              <Maximize2 className="w-4 h-4" />
+              Acessar Odontograma Completo
+            </button>
+          </div>
+
+          {/* Detailed Summary List of Diagnosed/Noted Teeth */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-emerald-100/80 dark:border-slate-800 p-5 md:p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-emerald-100/60 dark:border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  Resumo dos Elementos Dentais Diagnosticados
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Lista rápida de dentes com cáries, restaurações, canal ou observações
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOdontogramModal(true)}
+                className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+              >
+                <span>Editar no Mapa 2D</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {affectedTeeth.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <p className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200">
+                  Arcada dentária íntegra e sem anotações
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  Clique no botão acima para abrir o mapa anatômico interativo e registrar dentes, faces ou condições.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {affectedTeeth.map((tooth) => (
+                  <div
+                    key={tooth.toothNumber}
+                    onClick={() => setShowOdontogramModal(true)}
+                    className="p-3.5 rounded-2xl border border-emerald-100 dark:border-slate-800 bg-[#F3F7F5]/50 dark:bg-slate-800/40 hover:border-emerald-500/60 cursor-pointer transition-all space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-emerald-600 text-white font-black text-xs">
+                        Dente #{tooth.toothNumber}
+                      </span>
+                      {tooth.generalCondition && (
+                        <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                          {tooth.generalCondition.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      {tooth.conditions.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {tooth.conditions.map((c, idx) => (
+                            <span
+                              key={idx}
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600"
+                            >
+                              Face {c.surface}: {c.condition}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {tooth.notes && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400 italic">
+                          "{tooth.notes}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen/Modal Odontogram with rotation optimization */}
+      {showOdontogramModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4 bg-slate-900/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-emerald-100 dark:border-slate-800 shadow-2xl max-w-6xl w-full max-h-[98vh] h-full sm:h-auto flex flex-col animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
+            <div className="flex items-center justify-between p-3 sm:p-4 pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-base font-bold text-slate-900 dark:text-slate-100">
+                    Odontograma Anatômico - {patient.name}
+                  </h3>
+                  <p className="text-[10px] sm:text-xs text-slate-500">
+                    Prontuário: {patient.recordNumber} • Toque em qualquer dente para anotar faces
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowOdontogramModal(false)}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1 transition-colors"
+              >
+                Concluir & Fechar
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4">
+              <Odontogram
+                odontogram={patient.odontogram}
+                onToothUpdate={handleToothUpdate}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -355,10 +513,10 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 text-center">
               <Camera className="w-10 h-10 text-slate-300 mx-auto mb-2" />
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                Nenhuma radiografia ou foto anexada.
+                Nenhum exame radiográfico ou foto anexada.
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
-                Guarde exames periapicais, panorâmicas e fotos intraorais com total segurança e offline.
+                Anexe periapicais, panorâmicas e fotos intraorais com laudo para acompanhamento.
               </p>
               <button
                 type="button"
@@ -373,33 +531,40 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
               {patient.exams.map((exam) => (
                 <div
                   key={exam.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs group hover:shadow-md transition-all flex flex-col justify-between"
+                  onClick={() => setActiveViewingExam(exam)}
+                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-xs hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
                 >
-                  <div
-                    onClick={() => setActiveViewingExam(exam)}
-                    className="relative aspect-4/3 bg-slate-950 cursor-pointer overflow-hidden flex items-center justify-center"
-                  >
+                  <div className="relative aspect-4/3 bg-slate-950 flex items-center justify-center overflow-hidden">
                     <img
                       src={exam.imageUrl}
                       alt={exam.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      referrerPolicy="no-referrer"
                     />
-                    <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white">
-                      <span className="px-3 py-1.5 rounded-xl bg-emerald-600 text-xs font-bold flex items-center gap-1 shadow-md">
-                        <Eye className="w-3.5 h-3.5" /> Abrir no Negatoscópio
-                      </span>
-                    </div>
                     <span className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-900/80 text-white backdrop-blur-xs">
-                      {exam.type}
+                      {exam.type.toUpperCase()}
                     </span>
+                    <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                      <Eye className="w-4 h-4" /> Visualizar
+                    </div>
                   </div>
 
-                  <div className="p-3.5 space-y-2">
-                    <div className="flex items-start justify-between gap-1">
-                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">
+                  <div className="p-3.5 space-y-1.5 flex-1 flex flex-col justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 line-clamp-1">
                         {exam.title}
                       </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {new Date(exam.date + 'T12:00:00').toLocaleDateString('pt-BR')} • {exam.teethReferenced ? `Dente ${exam.teethReferenced}` : 'Arcada'}
+                      </p>
+                      {exam.notes && (
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 italic line-clamp-2 mt-1">
+                          "{exam.notes}"
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400">Clique para abrir</span>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -412,21 +577,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
-                      {exam.notes || 'Sem laudo radiográfico registrado.'}
-                    </p>
-
-                    {exam.diagnosis && (
-                      <div className="text-[10px] font-medium px-2 py-1 rounded-md bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
-                        {exam.diagnosis}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
-                      <span>{new Date(exam.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
-                      {exam.teethReferenced && <span>Dente: {exam.teethReferenced}</span>}
-                    </div>
                   </div>
                 </div>
               ))}
@@ -437,14 +587,16 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
 
       {/* Tab 4: Anamnese & Histórico Médico */}
       {activeTab === 'anamnese' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-xs space-y-4">
             <h3 className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider">
-              1. Queixa Principal & HMA
+              1. Queixa Principal & História Médica
             </h3>
-            <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-xl">
+            <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Queixa Principal:</span>
-              <p className="text-xs text-slate-900 dark:text-slate-100 italic">"{patient.anamnese.chiefComplaint}"</p>
+              <p className="text-xs md:text-sm text-slate-800 dark:text-slate-200 font-medium bg-emerald-50/50 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900/40">
+                "{patient.anamnese.chiefComplaint}"
+              </p>
             </div>
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">História da Moléstia Atual:</span>
@@ -505,52 +657,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
                   <span className="text-xs text-slate-500">Nenhum hábito deletério relatado.</span>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 5: Documentos & TCLE */}
-      {activeTab === 'documentos' && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                  <Award className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                    Termo de Consentimento Livre e Esclarecido (TCLE)
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Autorização para atendimento em Clínica Odontológica Universitária e uso acadêmico de imagens
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Assinado pelo Paciente
-                </span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-              "Declaro que fui informado(a) sobre a natureza do tratamento odontológico executado por acadêmicos sob supervisão docente, autorizando a realização dos procedimentos necessários, bem como a documentação fotográfica e radiográfica para acompanhamento e fins acadêmicos, garantido o sigilo de minha identidade nos termos da Lei Geral de Proteção de Dados (LGPD)."
-            </p>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">
-                Data do Consentimento: <strong>{new Date(patient.consentSignatureDate || patient.createdAt).toLocaleDateString('pt-BR')}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={handleExportPDF}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs"
-              >
-                <Download className="w-3.5 h-3.5" /> Exportar TCLE Assinado em PDF
-              </button>
             </div>
           </div>
         </div>

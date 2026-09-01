@@ -4,16 +4,15 @@ import { DashboardView } from './components/DashboardView';
 import { PatientsListView } from './components/PatientsListView';
 import { PatientDetailView } from './components/PatientDetailView';
 import { CalendarView } from './components/CalendarView';
-import { DuplaChatView } from './components/DuplaChatView';
 import { TaskBoardView } from './components/TaskBoardView';
+import { StudyView } from './components/StudyView';
 import { SettingsView } from './components/SettingsView';
-import { DentalAIAssistant } from './components/DentalAIAssistant';
 import { AppointmentModal } from './components/AppointmentModal';
+import { PatientModal } from './components/PatientModal';
 import { 
   LayoutDashboard, 
   Users, 
   Calendar, 
-  MessageSquare, 
   CheckSquare, 
   Settings, 
   Menu, 
@@ -32,7 +31,12 @@ import {
   ShieldCheck,
   Search,
   Share2,
-  BookOpen
+  BookOpen,
+  UserPlus,
+  CalendarPlus,
+  RefreshCw,
+  Smartphone,
+  Laptop
 } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -48,7 +52,11 @@ const MainAppContent: React.FC = () => {
     setPrivacyMode, 
     isOnline, 
     syncStatus, 
+    triggerCloudSync,
     triggerDriveSync,
+    connectedDevicesCount,
+    isCloudConnected,
+    lastSyncedTime,
     currentStudent,
     duplaPartner,
     toastMessage,
@@ -57,6 +65,8 @@ const MainAppContent: React.FC = () => {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [globalAptModalPatientId, setGlobalAptModalPatientId] = useState<string | null>(null);
+  const [showGlobalPatientModal, setShowGlobalPatientModal] = useState<boolean>(false);
+  const [showGlobalNewAptModal, setShowGlobalNewAptModal] = useState<boolean>(false);
 
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
@@ -72,9 +82,8 @@ const MainAppContent: React.FC = () => {
     { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard, badge: undefined },
     { id: 'patients' as const, label: 'Pacientes', icon: Users, badge: patients.length },
     { id: 'calendar' as const, label: 'Calendário', icon: Calendar, badge: undefined },
-    { id: 'ai-assistant' as const, label: 'Odonto IA Mentor', icon: Sparkles, badge: 'IA' },
-    { id: 'chat' as const, label: 'Chat Dupla', icon: MessageSquare, badge: undefined },
     { id: 'tasks' as const, label: 'Checklist & Tarefas', icon: CheckSquare, badge: undefined },
+    { id: 'studies' as const, label: 'Estudos & Provas', icon: BookOpen, badge: undefined },
     { id: 'settings' as const, label: 'Configurações', icon: Settings, badge: undefined }
   ];
 
@@ -90,19 +99,19 @@ const MainAppContent: React.FC = () => {
 
       {/* Mobile Hamburger Slide-out Drawer */}
       <aside
-        className={`fixed top-0 left-0 bottom-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-emerald-100 dark:border-slate-800 p-5 flex flex-col justify-between transform transition-transform duration-300 ease-in-out md:hidden ${
+        className={`fixed top-0 left-0 bottom-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-emerald-100 dark:border-slate-800 p-5 flex flex-col justify-between transform transition-transform duration-300 ease-in-out md:hidden overflow-y-auto ${
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* Mobile Drawer Header */}
-          <div className="flex items-center justify-between border-b border-emerald-100/60 dark:border-slate-800 pb-4">
+          <div className="flex items-center justify-between border-b border-emerald-100/60 dark:border-slate-800 pb-3">
             <div>
               <h1 className="font-bold text-base text-emerald-950 dark:text-emerald-100 leading-tight tracking-tight">
                 Gestão Acadêmica
               </h1>
-              <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block">
-                Odontologia UEL
+              <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block truncate max-w-[180px]">
+                {currentStudent?.university || 'Odontologia UEL'}
               </span>
             </div>
 
@@ -115,9 +124,41 @@ const MainAppContent: React.FC = () => {
             </button>
           </div>
 
+          {/* Quick Action Buttons in Mobile Drawer */}
+          <div className="space-y-2">
+            <p className="px-1 text-[10px] uppercase font-bold text-slate-400 tracking-widest">
+              Ações Rápidas
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowGlobalPatientModal(true);
+                }}
+                className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 shadow-xs transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Novo Paciente</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowGlobalNewAptModal(true);
+                }}
+                className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 font-bold text-xs flex flex-col items-center justify-center gap-1 hover:bg-emerald-100 transition-colors"
+              >
+                <CalendarPlus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Novo Horário</span>
+              </button>
+            </div>
+          </div>
+
           {/* Navigation links */}
           <nav className="space-y-1">
-            <p className="px-2 text-[10px] uppercase font-bold text-slate-400 mb-2 tracking-widest">
+            <p className="px-1 text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-widest">
               Navegação Principal
             </p>
             {navItems.map((item) => {
@@ -135,7 +176,7 @@ const MainAppContent: React.FC = () => {
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-transparent border border-slate-300 dark:border-slate-600'}`} />
+                    <item.icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                     <span>{item.label}</span>
                   </div>
 
@@ -198,35 +239,35 @@ const MainAppContent: React.FC = () => {
         <aside className="hidden md:flex md:w-60 lg:w-64 bg-white dark:bg-slate-900 border-r border-emerald-100 dark:border-slate-800 flex-col justify-between shrink-0 sticky top-0 h-screen overflow-y-auto">
           <div className="flex flex-col flex-1">
             {/* Brand Logo Header */}
-            <div className="p-6">
+            <div className="p-5 pb-3">
               <h1 className="font-bold text-lg text-emerald-950 dark:text-emerald-100 leading-tight tracking-tight">
                 Gestão Acadêmica<br />
-                <span className="text-[10px] font-semibold text-emerald-500 uppercase tracking-widest">
-                  Odontologia UEL
+                <span className="text-[10px] font-semibold text-emerald-500 uppercase tracking-widest block truncate max-w-[200px]" title={currentStudent?.university || 'Odontologia UEL'}>
+                  {currentStudent?.university || 'Odontologia UEL'}
                 </span>
               </h1>
             </div>
 
             {/* Navigation links */}
-            <div className="flex-1 px-4 space-y-1">
-              <p className="px-4 text-[10px] uppercase font-bold text-slate-400 mb-2 tracking-widest">
-                Clínica & Estudos
+            <div className="flex-1 px-4 py-2 space-y-1">
+              <p className="px-3 text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-widest">
+                Clínica & Atendimentos
               </p>
-              {navItems.slice(0, 4).map((item) => {
+              {navItems.slice(0, 3).map((item) => {
                 const isActive = currentTab === item.id && (!selectedPatientId || item.id === 'patients');
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => handleNavClick(item.id)}
-                    className={`px-4 py-2.5 rounded-xl flex items-center justify-between font-medium cursor-pointer transition-colors text-xs sm:text-sm ${
+                    className={`px-3.5 py-2 rounded-xl flex items-center justify-between font-medium cursor-pointer transition-colors text-xs sm:text-sm ${
                       isActive
                         ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-100 dark:border-emerald-800/60'
                         : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-transparent border border-slate-300 dark:border-slate-600'}`} />
+                    <div className="flex items-center gap-2.5">
+                      <item.icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                       <span>{item.label}</span>
                     </div>
 
@@ -239,25 +280,25 @@ const MainAppContent: React.FC = () => {
                 );
               })}
 
-              <div className="mt-5 pt-3 border-t border-emerald-100/60 dark:border-slate-800">
-                <p className="px-4 text-[10px] uppercase font-bold text-slate-400 mb-2 tracking-widest">
-                  Colaboração & Gestão
+              <div className="mt-4 pt-2 border-t border-emerald-100/60 dark:border-slate-800">
+                <p className="px-3 text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-widest">
+                  Gestão, Estudos & Metas
                 </p>
-                {navItems.slice(4).map((item) => {
+                {navItems.slice(3).map((item) => {
                   const isActive = currentTab === item.id;
 
                   return (
                     <div
                       key={item.id}
                       onClick={() => handleNavClick(item.id)}
-                      className={`px-4 py-2.5 rounded-xl flex items-center justify-between font-medium cursor-pointer transition-colors text-xs sm:text-sm ${
+                      className={`px-3.5 py-2 rounded-xl flex items-center justify-between font-medium cursor-pointer transition-colors text-xs sm:text-sm ${
                         isActive
                           ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-100 dark:border-emerald-800/60'
                           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-transparent border border-slate-300 dark:border-slate-600'}`} />
+                      <div className="flex items-center gap-2.5">
+                        <item.icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                         <span>{item.label}</span>
                       </div>
 
@@ -274,7 +315,7 @@ const MainAppContent: React.FC = () => {
 
             {/* Bottom Student Profile Card */}
             <div className="p-4 mt-auto space-y-2">
-              <div className="bg-slate-900 rounded-2xl p-4 text-white flex items-center gap-3 shadow-sm">
+              <div className="bg-slate-900 rounded-2xl p-3.5 text-white flex items-center gap-3 shadow-sm">
                 <div className="w-8 h-8 rounded-full bg-emerald-400 flex items-center justify-center text-slate-900 font-bold text-xs shrink-0">
                   {(currentStudent?.name || 'RM').split(' ').map(n => n[0]).slice(0, 2).join('')}
                 </div>
@@ -309,7 +350,7 @@ const MainAppContent: React.FC = () => {
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Header matching High Density theme */}
+          {/* Header matching High Density theme (without "+" button as requested) */}
           <header className="h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-emerald-100 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
             {/* Left: Breadcrumbs / Mobile trigger */}
             <div className="flex items-center gap-3">
@@ -336,39 +377,30 @@ const MainAppContent: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Sync Status & High Density Action Buttons */}
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div 
-                onClick={() => triggerDriveSync()}
-                className="cursor-pointer hidden sm:flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-100 dark:border-emerald-800/80 hover:bg-emerald-100 transition-colors"
-                title="Clique para forçar sincronização"
+            {/* Right: Clean controls with mode switches */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button 
+                type="button"
+                onClick={() => setPrivacyMode(!privacyMode)}
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                  privacyMode
+                    ? 'border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                }`}
+                title="Ativar/Desativar proteção de dados dos pacientes"
               >
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>{syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizado Cloud'}</span>
-              </div>
+                <Lock className="w-3.5 h-3.5" />
+                <span>{privacyMode ? 'Sigilo Ativo' : 'Modo Sigilo'}</span>
+              </button>
 
-              <div className="flex items-center gap-2">
-                <button 
-                  type="button"
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 dark:text-slate-300 hover:text-emerald-600 transition-colors"
-                  title={darkMode ? 'Modo Claro' : 'Modo Escuro'}
-                >
-                  {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-emerald-600" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentTab !== 'patients') setCurrentTab('patients');
-                    setSelectedPatientId(null);
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 sm:px-4 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-emerald-200/50 dark:shadow-none flex items-center gap-1.5 transition-transform active:scale-95"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span className="hidden xs:inline">Novo Atendimento</span>
-                </button>
-              </div>
+              <button 
+                type="button"
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 dark:text-slate-300 hover:text-emerald-600 transition-colors"
+                title={darkMode ? 'Modo Claro' : 'Modo Escuro'}
+              >
+                {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-emerald-600" />}
+              </button>
             </div>
           </header>
 
@@ -393,11 +425,9 @@ const MainAppContent: React.FC = () => {
 
             {currentTab === 'calendar' && <CalendarView />}
 
-            {currentTab === 'ai-assistant' && <DentalAIAssistant />}
-
-            {currentTab === 'chat' && <DuplaChatView />}
-
             {currentTab === 'tasks' && <TaskBoardView />}
+
+            {currentTab === 'studies' && <StudyView />}
 
             {currentTab === 'settings' && <SettingsView />}
           </main>
@@ -405,10 +435,20 @@ const MainAppContent: React.FC = () => {
       </div>
 
       {/* Global Appointment Modal if triggered */}
-      {globalAptModalPatientId && (
+      {(globalAptModalPatientId || showGlobalNewAptModal) && (
         <AppointmentModal
-          initialPatientId={globalAptModalPatientId}
-          onClose={() => setGlobalAptModalPatientId(null)}
+          initialPatientId={globalAptModalPatientId || undefined}
+          onClose={() => {
+            setGlobalAptModalPatientId(null);
+            setShowGlobalNewAptModal(false);
+          }}
+        />
+      )}
+
+      {/* Global Patient Modal for registration */}
+      {showGlobalPatientModal && (
+        <PatientModal
+          onClose={() => setShowGlobalPatientModal(false)}
         />
       )}
 
