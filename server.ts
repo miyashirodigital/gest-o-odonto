@@ -358,6 +358,7 @@ async function startServer() {
       broadcastSSE({
         type: 'state_update',
         state: globalSyncState,
+        senderId: updates.senderId,
         source: updates.source || 'device'
       });
 

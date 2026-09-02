@@ -31,14 +31,25 @@ export interface CloudClinicState {
   };
   updatedAt: number;
   source?: string;
+  senderId?: string;
 }
 
 export interface CloudSyncCallbacks {
   onInit: (state: CloudClinicState, connectedDevices: number) => void;
-  onStateUpdate: (state: CloudClinicState, source?: string) => void;
+  onStateUpdate: (state: CloudClinicState, source?: string, senderId?: string) => void;
   onNewChatMessage: (message: ChatMessage, allMessages?: ChatMessage[]) => void;
   onPresence: (connectedDevices: number) => void;
   onConnectionChange: (connected: boolean) => void;
+}
+
+export function getOrCreateDeviceId(): string {
+  if (typeof window === 'undefined') return 'server';
+  let id = localStorage.getItem('odonto_device_id');
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+    localStorage.setItem('odonto_device_id', id);
+  }
+  return id;
 }
 
 let eventSourceInstance: EventSource | null = null;
@@ -130,7 +141,7 @@ export function subscribeToCloudEvents(callbacks: CloudSyncCallbacks): () => voi
           if (payload.type === 'init' && payload.state) {
             callbacks.onInit(payload.state, payload.connectedClients || 1);
           } else if (payload.type === 'state_update' && payload.state) {
-            callbacks.onStateUpdate(payload.state, payload.source);
+            callbacks.onStateUpdate(payload.state, payload.source, payload.senderId);
           } else if (payload.type === 'new_chat_message' && payload.message) {
             callbacks.onNewChatMessage(payload.message, payload.chatMessages);
           } else if (payload.type === 'presence') {
