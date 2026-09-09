@@ -1,5 +1,6 @@
 import { 
   Patient, 
+  PatientAnamnese,
   Appointment, 
   TaskItem, 
   ChatMessage, 
@@ -15,6 +16,116 @@ import {
 const DB_NAME = 'OdontoAcademicoDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'odonto_store';
+
+export const DEFAULT_ANAMNESE: PatientAnamnese = {
+  chiefComplaint: '',
+  currentIllnessHistory: '',
+  medicalHistory: {
+    hypertension: false,
+    diabetes: false,
+    cardiacProblems: false,
+    bleedingDisorders: false,
+    hepatitisOrHIV: false,
+    asthmaOrRespiratory: false,
+    pregnantOrLactating: false,
+    otherConditions: ''
+  },
+  allergies: [],
+  continuousMedications: [],
+  vitalSigns: {
+    bloodPressure: '120x80 mmHg',
+    heartRate: '75 bpm'
+  },
+  habits: {
+    smoker: false,
+    alcohol: false,
+    bruxism: false,
+    nailBiting: false
+  },
+  lastDentalVisit: ''
+};
+
+export function normalizePatient(raw: any): Patient {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      id: String(raw || Math.random()),
+      name: 'Paciente',
+      cpf: '',
+      birthDate: '',
+      gender: 'Outro',
+      phone: '',
+      recordNumber: '',
+      discipline: 'Clínica Integrada',
+      anamnese: DEFAULT_ANAMNESE,
+      odontogram: {},
+      evolutions: [],
+      exams: [],
+      consentSigned: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  const rawAnamnese = raw.anamnese || {};
+  const medicalHistory = rawAnamnese.medicalHistory || {};
+  const vitalSigns = rawAnamnese.vitalSigns || {};
+  const habits = rawAnamnese.habits || {};
+
+  return {
+    ...raw,
+    id: String(raw.id || ''),
+    name: String(raw.name || 'Paciente Sem Nome'),
+    cpf: String(raw.cpf || ''),
+    birthDate: String(raw.birthDate || ''),
+    gender: raw.gender || 'Outro',
+    phone: String(raw.phone || ''),
+    recordNumber: String(raw.recordNumber || ''),
+    discipline: raw.discipline || 'Clínica Integrada',
+    odontogram: raw.odontogram && typeof raw.odontogram === 'object' ? raw.odontogram : {},
+    evolutions: Array.isArray(raw.evolutions) ? raw.evolutions : [],
+    exams: Array.isArray(raw.exams) ? raw.exams : [],
+    consentSigned: Boolean(raw.consentSigned),
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || new Date().toISOString(),
+    anamnese: {
+      chiefComplaint: String(rawAnamnese.chiefComplaint || ''),
+      currentIllnessHistory: String(rawAnamnese.currentIllnessHistory || ''),
+      lastDentalVisit: String(rawAnamnese.lastDentalVisit || ''),
+      medicalHistory: {
+        hypertension: Boolean(medicalHistory.hypertension),
+        diabetes: Boolean(medicalHistory.diabetes),
+        cardiacProblems: Boolean(medicalHistory.cardiacProblems),
+        bleedingDisorders: Boolean(medicalHistory.bleedingDisorders),
+        hepatitisOrHIV: Boolean(medicalHistory.hepatitisOrHIV),
+        asthmaOrRespiratory: Boolean(medicalHistory.asthmaOrRespiratory),
+        pregnantOrLactating: Boolean(medicalHistory.pregnantOrLactating),
+        otherConditions: String(medicalHistory.otherConditions || '')
+      },
+      allergies: Array.isArray(rawAnamnese.allergies) 
+        ? rawAnamnese.allergies.filter(Boolean).map(String) 
+        : [],
+      continuousMedications: Array.isArray(rawAnamnese.continuousMedications) 
+        ? rawAnamnese.continuousMedications.filter(Boolean).map(String) 
+        : [],
+      vitalSigns: {
+        bloodPressure: String(vitalSigns.bloodPressure || '120x80 mmHg'),
+        heartRate: String(vitalSigns.heartRate || '75 bpm'),
+        bloodGlucose: vitalSigns.bloodGlucose ? String(vitalSigns.bloodGlucose) : undefined
+      },
+      habits: {
+        smoker: Boolean(habits.smoker),
+        alcohol: Boolean(habits.alcohol),
+        bruxism: Boolean(habits.bruxism),
+        nailBiting: Boolean(habits.nailBiting)
+      }
+    }
+  };
+}
+
+export function normalizePatients(list: any[]): Patient[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter(p => p && typeof p === 'object' && p.id).map(normalizePatient);
+}
 
 export const getPatientActiveAllergies = (allergies?: string[]): string[] => {
   if (!allergies || !Array.isArray(allergies)) return [];

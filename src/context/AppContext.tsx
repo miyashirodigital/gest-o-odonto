@@ -30,7 +30,9 @@ import {
   INITIAL_GOOGLE_RESOURCES,
   getFromStorage, 
   getSyncStorage, 
-  saveToStorage 
+  saveToStorage,
+  normalizePatient,
+  normalizePatients
 } from '../utils/storage';
 import {
   initFirebase,
@@ -231,9 +233,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   });
 
   // Collections state initialized synchronously from local storage cache
-  const [patients, setPatients] = useState<Patient[]>(() => {
-    return getSyncStorage<Patient[]>('patients', INITIAL_PATIENTS) || [];
+  const [patients, setPatientsState] = useState<Patient[]>(() => {
+    const raw = getSyncStorage<Patient[]>('patients', INITIAL_PATIENTS) || [];
+    return normalizePatients(raw);
   });
+
+  const setPatients = useCallback((val: Patient[] | ((prev: Patient[]) => Patient[])) => {
+    if (typeof val === 'function') {
+      setPatientsState((prev) => normalizePatients(val(prev)));
+    } else {
+      setPatientsState(normalizePatients(val));
+    }
+  }, []);
   const [appointments, setAppointments] = useState<Appointment[]>(() => {
     return getSyncStorage<Appointment[]>('appointments', INITIAL_APPOINTMENTS) || [];
   });
@@ -357,6 +368,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     return Array.from(map.values());
+  }
+
+  function mergePatients(
+    localList: Patient[] | undefined | null,
+    remoteList: Patient[] | undefined | null,
+    deletedIds: Set<string>
+  ): Patient[] {
+    const merged = mergeRecords(localList, remoteList, deletedIds);
+    return normalizePatients(merged);
   }
 
   // Toast Helper
@@ -565,7 +585,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             // Bidirectional smart merge:
             // Combines remote data with local data, preserving local creations and remote records
-            const mergedPatients = mergeRecords(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
+            const mergedPatients = mergePatients(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
             mergedPatients.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
             patientsRef.current = mergedPatients;
             setPatients(mergedPatients);
@@ -674,9 +694,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (cloudState && (cloudState.patients || cloudState.student || cloudState.dupla || cloudState.appointments)) {
               sourceName = 'Nuvem';
               if (Array.isArray(cloudState.patients)) {
-                patientsRef.current = cloudState.patients;
-                setPatients(cloudState.patients);
-                saveToStorage('patients', cloudState.patients);
+                const list = normalizePatients(cloudState.patients);
+                patientsRef.current = list;
+                setPatients(list);
+                saveToStorage('patients', list);
               }
               if (Array.isArray(cloudState.appointments)) {
                 appointmentsRef.current = cloudState.appointments;
@@ -722,7 +743,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (state) {
           isInternalChange.current = true;
           if (Array.isArray(state.patients)) {
-            const merged = mergeRecords(patientsRef.current, state.patients, deletedPatientIdsRef.current);
+            const merged = mergePatients(patientsRef.current, state.patients, deletedPatientIdsRef.current);
             patientsRef.current = merged;
             setPatients(merged);
             saveToStorage('patients', merged);
@@ -779,7 +800,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         isInternalChange.current = true;
         if (Array.isArray(state.patients)) {
-          const merged = mergeRecords(patientsRef.current, state.patients, deletedPatientIdsRef.current);
+          const merged = mergePatients(patientsRef.current, state.patients, deletedPatientIdsRef.current);
           patientsRef.current = merged;
           setPatients(merged);
           saveToStorage('patients', merged);
@@ -874,7 +895,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // 1. Patients collection listener (real-time additions, updates, deletions)
       const unsubPatients = onSnapshot(collection(db, 'odonto_patients'), (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => d.data() as Patient);
+          const raw = snapshot.docs.map((d) => d.data() as Patient);
+          const list = normalizePatients(raw);
           list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
           isInternalChange.current = true;
           patientsRef.current = list;
@@ -1040,8 +1062,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       isInternalChange.current = true;
       if (action === 'update_patients' && payload) {
-        patientsRef.current = payload;
-        setPatients(payload);
+        const list = normalizePatients(payload);
+        patientsRef.current = list;
+        setPatients(list);
       }
       if (action === 'update_appointments' && payload) {
         appointmentsRef.current = payload;
@@ -1154,7 +1177,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ]);
 
         if (!patSnap.empty) {
-          const list = patSnap.docs.map((d) => d.data() as Patient);
+          const raw = patSnap.docs.map((d) => d.data() as Patient);
+          const list = normalizePatients(raw);
           list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
           isInternalChange.current = true;
           patientsRef.current = list;
@@ -1304,7 +1328,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const remoteExams = !examSnap.empty ? examSnap.docs.map(d => d.data() as ExamSchedule) : [];
         const remoteResources = !resSnap.empty ? resSnap.docs.map(d => d.data() as GoogleResourceLink) : [];
 
-        const mergedPatients = mergeRecords(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
+        const mergedPatients = mergePatients(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
         mergedPatients.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         patientsRef.current = mergedPatients;
         setPatients(mergedPatients);
@@ -1467,12 +1491,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Patient Actions with guaranteed immediate persistence
   const addPatient = (patientData: Omit<Patient, 'id' | 'createdAt' | 'updatedAt'>): string => {
     const id = `p_${Date.now()}`;
-    const newPatient: Patient = {
+    const newPatient: Patient = normalizePatient({
       ...patientData,
       id,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    });
 
     deletedPatientIdsRef.current.delete(id);
     saveDeletedIds('deleted_patient_ids', deletedPatientIdsRef.current);
@@ -1493,7 +1517,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updatePatient = (id: string, updates: Partial<Patient>) => {
     lastLocalWriteTimestamp.current = Date.now();
     const updated = patientsRef.current.map((p) =>
-      p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
+      p.id === id ? normalizePatient({ ...p, ...updates, updatedAt: new Date().toISOString() }) : p
     );
     patientsRef.current = updated;
     setPatients(updated);

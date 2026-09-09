@@ -53,7 +53,8 @@ export function exportPatientClinicalRecordPDF(patient: Patient, studentName: st
   currentY += 40;
 
   // Anamnesis & Medical Alert Box
-  const hasAllergies = patient.anamnese.allergies && patient.anamnese.allergies.length > 0;
+  const allergiesList = Array.isArray(patient.anamnese?.allergies) ? patient.anamnese.allergies : [];
+  const hasAllergies = allergiesList.length > 0;
   
   if (hasAllergies) {
     doc.setFillColor(254, 242, 242);
@@ -62,7 +63,7 @@ export function exportPatientClinicalRecordPDF(patient: Patient, studentName: st
     doc.setTextColor(...alertRed);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.text(`⚠️ ALERTA MÉDICO / ALERGIAS: ${patient.anamnese.allergies.join(', ')}`, 18, currentY + 8);
+    doc.text(`⚠️ ALERTA MÉDICO / ALERGIAS: ${allergiesList.join(', ')}`, 18, currentY + 8);
     currentY += 16;
   }
 
@@ -77,25 +78,25 @@ export function exportPatientClinicalRecordPDF(patient: Patient, studentName: st
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Queixa Principal: "${patient.anamnese.chiefComplaint}"`, 18, currentY + 13, { maxWidth: 174 });
-  doc.text(`História da Moléstia Atual: "${patient.anamnese.currentIllnessHistory || 'Sem outras queixas associadas.'}"`, 18, currentY + 21, { maxWidth: 174 });
+  doc.text(`Queixa Principal: "${patient.anamnese?.chiefComplaint || 'Não informada'}"`, 18, currentY + 13, { maxWidth: 174 });
+  doc.text(`História da Moléstia Atual: "${patient.anamnese?.currentIllnessHistory || 'Sem outras queixas associadas.'}"`, 18, currentY + 21, { maxWidth: 174 });
   
   const medHistory = [];
-  if (patient.anamnese.medicalHistory.hypertension) medHistory.push('Hipertensão');
-  if (patient.anamnese.medicalHistory.diabetes) medHistory.push('Diabetes');
-  if (patient.anamnese.medicalHistory.cardiacProblems) medHistory.push('Cardiopatia');
-  if (patient.anamnese.medicalHistory.bleedingDisorders) medHistory.push('Distúrbio Hemorrágico');
-  if (patient.anamnese.medicalHistory.asthmaOrRespiratory) medHistory.push('Asma/Respiratório');
-  if (patient.anamnese.medicalHistory.pregnantOrLactating) medHistory.push('Gestante/Lactante');
+  if (patient.anamnese?.medicalHistory?.hypertension) medHistory.push('Hipertensão');
+  if (patient.anamnese?.medicalHistory?.diabetes) medHistory.push('Diabetes');
+  if (patient.anamnese?.medicalHistory?.cardiacProblems) medHistory.push('Cardiopatia');
+  if (patient.anamnese?.medicalHistory?.bleedingDisorders) medHistory.push('Distúrbio Hemorrágico');
+  if (patient.anamnese?.medicalHistory?.asthmaOrRespiratory) medHistory.push('Asma/Respiratório');
+  if (patient.anamnese?.medicalHistory?.pregnantOrLactating) medHistory.push('Gestante/Lactante');
   
   const medHistText = medHistory.length > 0 ? medHistory.join(', ') : 'Nenhuma alteração sistêmica relatada.';
   doc.text(`Condições Sistêmicas: ${medHistText}`, 18, currentY + 29);
   
-  const meds = patient.anamnese.continuousMedications.length > 0 ? patient.anamnese.continuousMedications.join(', ') : 'Nenhum medicamento contínuo.';
+  const meds = (patient.anamnese?.continuousMedications || []).length > 0 ? patient.anamnese!.continuousMedications.join(', ') : 'Nenhum medicamento contínuo.';
   doc.text(`Medicamentos em Uso: ${meds}`, 18, currentY + 35);
   
-  const pa = patient.anamnese.vitalSigns?.bloodPressure ? `PA: ${patient.anamnese.vitalSigns.bloodPressure}` : 'PA: Não aferida';
-  const fc = patient.anamnese.vitalSigns?.heartRate ? ` | FC: ${patient.anamnese.vitalSigns.heartRate}` : '';
+  const pa = patient.anamnese?.vitalSigns?.bloodPressure ? `PA: ${patient.anamnese.vitalSigns.bloodPressure}` : 'PA: Não aferida';
+  const fc = patient.anamnese?.vitalSigns?.heartRate ? ` | FC: ${patient.anamnese.vitalSigns.heartRate}` : '';
   doc.text(`Sinais Vitais: ${pa}${fc}`, 18, currentY + 41);
 
   currentY += 50;

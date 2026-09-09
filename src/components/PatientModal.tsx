@@ -28,31 +28,31 @@ export const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose }) 
   const [address, setAddress] = useState<string>(patient?.address || '');
 
   // Anamnese
-  const [chiefComplaint, setChiefComplaint] = useState<string>(patient?.anamnese.chiefComplaint || '');
-  const [currentIllnessHistory, setCurrentIllnessHistory] = useState<string>(patient?.anamnese.currentIllnessHistory || '');
-  const [lastDentalVisit, setLastDentalVisit] = useState<string>(patient?.anamnese.lastDentalVisit || '');
+  const [chiefComplaint, setChiefComplaint] = useState<string>(patient?.anamnese?.chiefComplaint || '');
+  const [currentIllnessHistory, setCurrentIllnessHistory] = useState<string>(patient?.anamnese?.currentIllnessHistory || '');
+  const [lastDentalVisit, setLastDentalVisit] = useState<string>(patient?.anamnese?.lastDentalVisit || '');
 
   // Medical conditions
-  const [hypertension, setHypertension] = useState<boolean>(patient?.anamnese.medicalHistory.hypertension || false);
-  const [diabetes, setDiabetes] = useState<boolean>(patient?.anamnese.medicalHistory.diabetes || false);
-  const [cardiacProblems, setCardiacProblems] = useState<boolean>(patient?.anamnese.medicalHistory.cardiacProblems || false);
-  const [bleedingDisorders, setBleedingDisorders] = useState<boolean>(patient?.anamnese.medicalHistory.bleedingDisorders || false);
-  const [hepatitisOrHIV, setHepatitisOrHIV] = useState<boolean>(patient?.anamnese.medicalHistory.hepatitisOrHIV || false);
-  const [asthmaOrRespiratory, setAsthmaOrRespiratory] = useState<boolean>(patient?.anamnese.medicalHistory.asthmaOrRespiratory || false);
-  const [pregnantOrLactating, setPregnantOrLactating] = useState<boolean>(patient?.anamnese.medicalHistory.pregnantOrLactating || false);
-  const [otherConditions, setOtherConditions] = useState<string>(patient?.anamnese.medicalHistory.otherConditions || '');
+  const [hypertension, setHypertension] = useState<boolean>(patient?.anamnese?.medicalHistory?.hypertension || false);
+  const [diabetes, setDiabetes] = useState<boolean>(patient?.anamnese?.medicalHistory?.diabetes || false);
+  const [cardiacProblems, setCardiacProblems] = useState<boolean>(patient?.anamnese?.medicalHistory?.cardiacProblems || false);
+  const [bleedingDisorders, setBleedingDisorders] = useState<boolean>(patient?.anamnese?.medicalHistory?.bleedingDisorders || false);
+  const [hepatitisOrHIV, setHepatitisOrHIV] = useState<boolean>(patient?.anamnese?.medicalHistory?.hepatitisOrHIV || false);
+  const [asthmaOrRespiratory, setAsthmaOrRespiratory] = useState<boolean>(patient?.anamnese?.medicalHistory?.asthmaOrRespiratory || false);
+  const [pregnantOrLactating, setPregnantOrLactating] = useState<boolean>(patient?.anamnese?.medicalHistory?.pregnantOrLactating || false);
+  const [otherConditions, setOtherConditions] = useState<string>(patient?.anamnese?.medicalHistory?.otherConditions || '');
 
   // Allergies & Meds
-  const [allergiesText, setAllergiesText] = useState<string>(patient?.anamnese.allergies.join(', ') || '');
-  const [medicationsText, setMedicationsText] = useState<string>(patient?.anamnese.continuousMedications.join(', ') || '');
-  const [bloodPressure, setBloodPressure] = useState<string>(patient?.anamnese.vitalSigns.bloodPressure || '120x80 mmHg');
-  const [heartRate, setHeartRate] = useState<string>(patient?.anamnese.vitalSigns.heartRate || '75 bpm');
+  const [allergiesText, setAllergiesText] = useState<string>(patient?.anamnese?.allergies ? patient.anamnese.allergies.join(', ') : '');
+  const [medicationsText, setMedicationsText] = useState<string>(patient?.anamnese?.continuousMedications ? patient.anamnese.continuousMedications.join(', ') : '');
+  const [bloodPressure, setBloodPressure] = useState<string>(patient?.anamnese?.vitalSigns?.bloodPressure || '120x80 mmHg');
+  const [heartRate, setHeartRate] = useState<string>(patient?.anamnese?.vitalSigns?.heartRate || '75 bpm');
 
   // Habits
-  const [smoker, setSmoker] = useState<boolean>(patient?.anamnese.habits.smoker || false);
-  const [alcohol, setAlcohol] = useState<boolean>(patient?.anamnese.habits.alcohol || false);
-  const [bruxism, setBruxism] = useState<boolean>(patient?.anamnese.habits.bruxism || false);
-  const [nailBiting, setNailBiting] = useState<boolean>(patient?.anamnese.habits.nailBiting || false);
+  const [smoker, setSmoker] = useState<boolean>(patient?.anamnese?.habits?.smoker || false);
+  const [alcohol, setAlcohol] = useState<boolean>(patient?.anamnese?.habits?.alcohol || false);
+  const [bruxism, setBruxism] = useState<boolean>(patient?.anamnese?.habits?.bruxism || false);
+  const [nailBiting, setNailBiting] = useState<boolean>(patient?.anamnese?.habits?.nailBiting || false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

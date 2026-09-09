@@ -65,7 +65,7 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
     });
   };
 
-  const activeAllergies = getActiveAllergies(patient.anamnese.allergies);
+  const activeAllergies = getActiveAllergies(patient.anamnese?.allergies);
 
   const maskValue = (val: string) => {
     if (!privacyMode) return val;
@@ -595,19 +595,19 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Queixa Principal:</span>
               <p className="text-xs md:text-sm text-slate-800 dark:text-slate-200 font-medium bg-emerald-50/50 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900/40">
-                "{patient.anamnese.chiefComplaint}"
+                "{patient.anamnese?.chiefComplaint || 'Não informada'}"
               </p>
             </div>
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">História da Moléstia Atual:</span>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                {patient.anamnese.currentIllnessHistory || 'Sem outras manifestações associadas.'}
+                {patient.anamnese?.currentIllnessHistory || 'Sem outras manifestações associadas.'}
               </p>
             </div>
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Última Visita Odontológica:</span>
               <p className="text-xs text-slate-600 dark:text-slate-400">
-                {patient.anamnese.lastDentalVisit || 'Não informado.'}
+                {patient.anamnese?.lastDentalVisit || 'Não informado.'}
               </p>
             </div>
           </div>
@@ -620,22 +620,22 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
               <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl">
                 <span className="text-[11px] text-slate-500 block">Pressão Arterial:</span>
                 <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                  {patient.anamnese.vitalSigns.bloodPressure || 'Não aferida'}
+                  {patient.anamnese?.vitalSigns?.bloodPressure || 'Não aferida'}
                 </span>
               </div>
               <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl">
                 <span className="text-[11px] text-slate-500 block">Frequência Cardíaca:</span>
                 <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                  {patient.anamnese.vitalSigns.heartRate || 'Não informada'}
+                  {patient.anamnese?.vitalSigns?.heartRate || 'Não informada'}
                 </span>
               </div>
             </div>
 
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Medicamentos em Uso Contínuo:</span>
-              {patient.anamnese.continuousMedications.length > 0 ? (
+              {(patient.anamnese?.continuousMedications || []).length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {patient.anamnese.continuousMedications.map((m, idx) => (
+                  {patient.anamnese!.continuousMedications.map((m, idx) => (
                     <span key={idx} className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium">
                       {m}
                     </span>
@@ -649,11 +649,11 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({ patient, o
             <div>
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Hábitos / Parafunções:</span>
               <div className="flex flex-wrap gap-2 text-xs">
-                {patient.anamnese.habits.smoker && <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Fumante</span>}
-                {patient.anamnese.habits.alcohol && <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800">Etilista</span>}
-                {patient.anamnese.habits.bruxism && <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800">Bruxismo/Aperto</span>}
-                {patient.anamnese.habits.nailBiting && <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800">Onicofagia</span>}
-                {!patient.anamnese.habits.smoker && !patient.anamnese.habits.alcohol && !patient.anamnese.habits.bruxism && !patient.anamnese.habits.nailBiting && (
+                {patient.anamnese?.habits?.smoker && <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Fumante</span>}
+                {patient.anamnese?.habits?.alcohol && <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800">Etilista</span>}
+                {patient.anamnese?.habits?.bruxism && <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800">Bruxismo/Aperto</span>}
+                {patient.anamnese?.habits?.nailBiting && <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-800">Onicofagia</span>}
+                {!patient.anamnese?.habits?.smoker && !patient.anamnese?.habits?.alcohol && !patient.anamnese?.habits?.bruxism && !patient.anamnese?.habits?.nailBiting && (
                   <span className="text-xs text-slate-500">Nenhum hábito deletério relatado.</span>
                 )}
               </div>

@@ -68,17 +68,18 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({ onSelectPati
   };
 
   const filteredPatients = patients.filter(patient => {
+    if (!patient) return false;
     if (disciplineFilter !== 'all' && patient.discipline !== disciplineFilter) return false;
     
-    const activeAllergies = getActiveAllergies(patient.anamnese.allergies);
+    const activeAllergies = getActiveAllergies(patient.anamnese?.allergies);
     if (allergyFilter && activeAllergies.length === 0) return false;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchName = patient.name.toLowerCase().includes(q);
-      const matchCpf = patient.cpf.toLowerCase().includes(q);
-      const matchRecord = patient.recordNumber.toLowerCase().includes(q);
-      const matchPhone = patient.phone.toLowerCase().includes(q);
+      const matchName = (patient.name || '').toLowerCase().includes(q);
+      const matchCpf = (patient.cpf || '').toLowerCase().includes(q);
+      const matchRecord = (patient.recordNumber || '').toLowerCase().includes(q);
+      const matchPhone = (patient.phone || '').toLowerCase().includes(q);
       if (!matchName && !matchCpf && !matchRecord && !matchPhone) return false;
     }
 
@@ -193,7 +194,7 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({ onSelectPati
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredPatients.map((patient) => {
-            const activeAllergies = getActiveAllergies(patient.anamnese.allergies);
+            const activeAllergies = getActiveAllergies(patient.anamnese?.allergies);
             const hasAllergies = activeAllergies.length > 0;
             const toothCount = Object.keys(patient.odontogram || {}).length;
 
@@ -215,21 +216,21 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({ onSelectPati
                         />
                       ) : (
                         <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white font-bold text-sm flex items-center justify-center shadow-xs shrink-0">
-                          {patient.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
+                          {(patient.name || 'P').split(' ').map(n => n[0]).slice(0, 2).join('')}
                         </div>
                       )}
                       <div className="overflow-hidden">
                         <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                          {maskName(patient.name)}
+                          {maskName(patient.name || 'Paciente')}
                         </h3>
                         <span className="text-[11px] font-mono text-slate-400 block">
-                          Prontuário: {patient.recordNumber}
+                          Prontuário: {patient.recordNumber || 'S/N'}
                         </span>
                       </div>
                     </div>
 
                     <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-800 shrink-0">
-                      {patient.discipline}
+                      {patient.discipline || 'Geral'}
                     </span>
                   </div>
 
@@ -244,11 +245,11 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({ onSelectPati
                   {/* Clinical info snippet */}
                   <div className="text-xs text-slate-600 dark:text-slate-400 bg-[#F3F7F5]/60 dark:bg-slate-800/40 p-2.5 rounded-xl border border-emerald-100/60 dark:border-slate-800 space-y-1">
                     <p className="line-clamp-2 italic text-[11px]">
-                      "{patient.anamnese.chiefComplaint}"
+                      "{patient.anamnese?.chiefComplaint || 'Sem queixa registrada'}"
                     </p>
                     <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/40 dark:border-slate-700/40">
-                      <span>CPF: {maskValue(patient.cpf)}</span>
-                      <span>Tel: {patient.phone}</span>
+                      <span>CPF: {maskValue(patient.cpf || '')}</span>
+                      <span>Tel: {patient.phone || 'Não informado'}</span>
                     </div>
                   </div>
 
@@ -260,11 +261,11 @@ export const PatientsListView: React.FC<PatientsListViewProps> = ({ onSelectPati
                     </span>
                     <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center gap-1">
                       <FileText className="w-3 h-3 text-blue-500" />
-                      {patient.evolutions.length} Atendimentos
+                      {(patient.evolutions || []).length} Atendimentos
                     </span>
                     <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center gap-1">
                       <Camera className="w-3 h-3 text-purple-500" />
-                      {patient.exams.length} Raios-X
+                      {(patient.exams || []).length} Raios-X
                     </span>
                   </div>
                 </div>
