@@ -6,6 +6,21 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: contain;
+  }
+
+  /* Prevent automatic iOS input zoom by guaranteeing 16px minimum font size on mobile inputs */
+  @media screen and (max-width: 768px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Exclusively allow zoom on radiograph viewer stage */
+  .radiograph-zoom-stage {
+    touch-action: pinch-zoom !important;
   }
 
   /* Sharpen and outline small UI typography */

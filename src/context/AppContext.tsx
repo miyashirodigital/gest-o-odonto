@@ -56,7 +56,9 @@ import {
   firestoreDeleteExamSchedule,
   firestoreSaveResource,
   firestoreDeleteResource,
-  firestoreSaveConfig
+  firestoreSaveConfig,
+  firestoreBatchSave,
+  firestoreSaveAllEntities
 } from '../utils/firebase';
 import { collection, doc, getDoc, getDocs, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import {
@@ -443,47 +445,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }).catch((e) => console.warn('[CloudSync] Server push warning:', e));
 
-      // 2. Push to Firebase Firestore (permanent granular cloud collections across all devices)
+      // 2. Push to Firebase Firestore (permanent cloud collections across all devices)
       const db = dbRef.current || getFirebaseDB();
       if (db) {
         try {
-          if (explicitOverrides?.patients) {
-            explicitOverrides.patients.forEach((p) => firestoreSavePatient(p));
-          }
-          if (explicitOverrides?.appointments) {
-            explicitOverrides.appointments.forEach((a) => firestoreSaveAppointment(a));
-          }
-          if (explicitOverrides?.tasks) {
-            explicitOverrides.tasks.forEach((t) => firestoreSaveTask(t));
-          }
-          if (explicitOverrides?.chatMessages) {
-            explicitOverrides.chatMessages.forEach((m) => firestoreSaveChatMessage(m));
-          }
-          if (explicitOverrides?.notices) {
-            explicitOverrides.notices.forEach((n) => firestoreSaveNotice(n));
-          }
-          if (explicitOverrides?.studySubjects) {
-            explicitOverrides.studySubjects.forEach((s) => firestoreSaveStudySubject(s));
-          }
-          if (explicitOverrides?.examSchedules) {
-            explicitOverrides.examSchedules.forEach((e) => firestoreSaveExamSchedule(e));
-          }
-          if (explicitOverrides?.googleResources) {
-            explicitOverrides.googleResources.forEach((r) => firestoreSaveResource(r));
-          }
-          if (explicitOverrides?.student) {
-            firestoreSaveConfig('student', explicitOverrides.student);
-          }
-          if (explicitOverrides?.dupla) {
-            firestoreSaveConfig('dupla', explicitOverrides.dupla);
-          }
-          if (explicitOverrides?.disciplines) {
-            firestoreSaveConfig('disciplines', { list: explicitOverrides.disciplines });
-          }
+          // If explicit overrides were passed, save those; otherwise ensure all active records in memory are saved
+          const patientsToSave = explicitOverrides?.patients ?? patientsRef.current;
+          const appointmentsToSave = explicitOverrides?.appointments ?? appointmentsRef.current;
+          const tasksToSave = explicitOverrides?.tasks ?? tasksRef.current;
+          const chatToSave = explicitOverrides?.chatMessages ?? chatMessagesRef.current;
+          const noticesToSave = explicitOverrides?.notices ?? noticesRef.current;
+          const studiesToSave = explicitOverrides?.studySubjects ?? studySubjectsRef.current;
+          const examsToSave = explicitOverrides?.examSchedules ?? examSchedulesRef.current;
+          const resourcesToSave = explicitOverrides?.googleResources ?? googleResourcesRef.current;
+          const studentToSave = explicitOverrides?.student ?? currentStudentRef.current;
+          const duplaToSave = explicitOverrides?.dupla ?? duplaPartnerRef.current;
+          const disciplinesToSave = explicitOverrides?.disciplines ?? disciplinesRef.current;
 
-          // Also keep legacy main_workspace updated as fallback snapshot
-          const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-          setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+          await Promise.all([
+            firestoreBatchSave('odonto_patients', patientsToSave),
+            firestoreBatchSave('odonto_appointments', appointmentsToSave),
+            firestoreBatchSave('odonto_tasks', tasksToSave),
+            firestoreBatchSave('odonto_chat', chatToSave),
+            firestoreBatchSave('odonto_notices', noticesToSave),
+            firestoreBatchSave('odonto_studies', studiesToSave),
+            firestoreBatchSave('odonto_exams', examsToSave),
+            firestoreBatchSave('odonto_resources', resourcesToSave),
+            firestoreSaveConfig('student', studentToSave),
+            firestoreSaveConfig('dupla', duplaToSave),
+            firestoreSaveConfig('disciplines', { list: disciplinesToSave }),
+            setDoc(doc(db, 'odonto_clinic', 'main_workspace'), {
+              ...payload,
+              updatedAt: new Date().toISOString()
+            }, { merge: true })
+          ]);
 
           setSyncStatus('synced');
           const now = new Date();
@@ -545,141 +540,127 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             if (isCancelled) return;
 
-            const hasGranularData = !patSnap.empty || !aptSnap.empty || !taskSnap.empty;
-
-            if (hasGranularData) {
-              sourceName = 'Firebase';
-              if (!patSnap.empty) {
-                const list = patSnap.docs.map((d) => d.data() as Patient);
-                list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-                patientsRef.current = list;
-                setPatients(list);
-                saveToStorage('patients', list);
-              }
-              if (!aptSnap.empty) {
-                const list = aptSnap.docs.map((d) => d.data() as Appointment);
-                list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
-                appointmentsRef.current = list;
-                setAppointments(list);
-                saveToStorage('appointments', list);
-              }
-              if (!taskSnap.empty) {
-                const list = taskSnap.docs.map((d) => d.data() as TaskItem);
-                tasksRef.current = list;
-                setTasks(list);
-                saveToStorage('tasks', list);
-              }
-              if (!chatSnap.empty) {
-                const list = chatSnap.docs.map((d) => d.data() as ChatMessage);
-                chatMessagesRef.current = list;
-                setChatMessages(list);
-                saveToStorage('chat_messages', list);
-              }
-              if (!noticeSnap.empty) {
-                const list = noticeSnap.docs.map((d) => d.data() as AcademicNotice);
-                noticesRef.current = list;
-                setNotices(list);
-                saveToStorage('notices', list);
-              }
-              if (!studySnap.empty) {
-                const list = studySnap.docs.map((d) => d.data() as StudySubject);
-                studySubjectsRef.current = list;
-                setStudySubjects(list);
-                saveToStorage('study_subjects', list);
-              }
-              if (!examSnap.empty) {
-                const list = examSnap.docs.map((d) => d.data() as ExamSchedule);
-                examSchedulesRef.current = list;
-                setExamSchedules(list);
-                saveToStorage('exam_schedules', list);
-              }
-              if (!resSnap.empty) {
-                const list = resSnap.docs.map((d) => d.data() as GoogleResourceLink);
-                googleResourcesRef.current = list;
-                setGoogleResources(list);
-                saveToStorage('google_resources', list);
-              }
-              if (studentSnap.exists() && studentSnap.data()?.name) {
-                const data = studentSnap.data() as StudentProfile;
-                currentStudentRef.current = data;
-                setCurrentStudent(data);
-                saveToStorage('student_profile', data);
-              }
-              if (duplaSnap.exists() && duplaSnap.data()?.name) {
-                const data = duplaSnap.data() as DuplaPartner;
-                duplaPartnerRef.current = data;
-                setDuplaPartner(data);
-                saveToStorage('dupla_partner', data);
-              }
-              if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
-                const list = discSnap.data().list as DisciplineConfig[];
-                disciplinesRef.current = list;
-                setDisciplines(list);
-                saveToStorage('disciplines', list);
-              }
-            } else {
-              // Check if legacy odonto_clinic/main_workspace has data to migrate
-              const legacySnap = await getDoc(doc(db, 'odonto_clinic', 'main_workspace'));
-              if (legacySnap.exists() && legacySnap.data()) {
-                const legacy = legacySnap.data()!;
-                sourceName = 'Firebase';
-                if (Array.isArray(legacy.patients) && legacy.patients.length > 0) {
-                  legacy.patients.forEach((p: any) => firestoreSavePatient(p));
-                  patientsRef.current = legacy.patients;
-                  setPatients(legacy.patients);
-                  saveToStorage('patients', legacy.patients);
+            // Also check main_workspace as fallback/migration source if granular collections are empty
+            let legacyWorkspace: any = null;
+            if (patSnap.empty && aptSnap.empty && taskSnap.empty) {
+              try {
+                const legacySnap = await getDoc(doc(db, 'odonto_clinic', 'main_workspace'));
+                if (legacySnap.exists()) {
+                  legacyWorkspace = legacySnap.data();
                 }
-                if (Array.isArray(legacy.appointments) && legacy.appointments.length > 0) {
-                  legacy.appointments.forEach((a: any) => firestoreSaveAppointment(a));
-                  appointmentsRef.current = legacy.appointments;
-                  setAppointments(legacy.appointments);
-                  saveToStorage('appointments', legacy.appointments);
-                }
-                if (Array.isArray(legacy.tasks) && legacy.tasks.length > 0) {
-                  legacy.tasks.forEach((t: any) => firestoreSaveTask(t));
-                  tasksRef.current = legacy.tasks;
-                  setTasks(legacy.tasks);
-                  saveToStorage('tasks', legacy.tasks);
-                }
-                if (Array.isArray(legacy.chatMessages) && legacy.chatMessages.length > 0) {
-                  legacy.chatMessages.forEach((m: any) => firestoreSaveChatMessage(m));
-                  chatMessagesRef.current = legacy.chatMessages;
-                  setChatMessages(legacy.chatMessages);
-                  saveToStorage('chat_messages', legacy.chatMessages);
-                }
-                if (Array.isArray(legacy.notices) && legacy.notices.length > 0) {
-                  legacy.notices.forEach((n: any) => firestoreSaveNotice(n));
-                  noticesRef.current = legacy.notices;
-                  setNotices(legacy.notices);
-                  saveToStorage('notices', legacy.notices);
-                }
-                if (legacy.student) {
-                  firestoreSaveConfig('student', legacy.student);
-                  currentStudentRef.current = legacy.student;
-                  setCurrentStudent(legacy.student);
-                  saveToStorage('student_profile', legacy.student);
-                }
-                if (legacy.dupla) {
-                  firestoreSaveConfig('dupla', legacy.dupla);
-                  duplaPartnerRef.current = legacy.dupla;
-                  setDuplaPartner(legacy.dupla);
-                  saveToStorage('dupla_partner', legacy.dupla);
-                }
-              } else {
-                // If completely empty in Firebase, seed local initial data into collections so other devices get it
-                patientsRef.current.forEach((p) => firestoreSavePatient(p));
-                appointmentsRef.current.forEach((a) => firestoreSaveAppointment(a));
-                tasksRef.current.forEach((t) => firestoreSaveTask(t));
-                chatMessagesRef.current.forEach((m) => firestoreSaveChatMessage(m));
-                noticesRef.current.forEach((n) => firestoreSaveNotice(n));
-                studySubjectsRef.current.forEach((s) => firestoreSaveStudySubject(s));
-                examSchedulesRef.current.forEach((e) => firestoreSaveExamSchedule(e));
-                googleResourcesRef.current.forEach((r) => firestoreSaveResource(r));
-                firestoreSaveConfig('student', currentStudentRef.current);
-                firestoreSaveConfig('dupla', duplaPartnerRef.current);
-                firestoreSaveConfig('disciplines', { list: disciplinesRef.current });
+              } catch (e) {
+                console.warn('[Firestore] legacySnap error:', e);
               }
             }
+
+            // Extract remote collections, falling back to legacyWorkspace if collections are empty
+            const remotePatients = !patSnap.empty ? patSnap.docs.map(d => d.data() as Patient) : (legacyWorkspace?.patients || []);
+            const remoteAppointments = !aptSnap.empty ? aptSnap.docs.map(d => d.data() as Appointment) : (legacyWorkspace?.appointments || []);
+            const remoteTasks = !taskSnap.empty ? taskSnap.docs.map(d => d.data() as TaskItem) : (legacyWorkspace?.tasks || []);
+            const remoteChat = !chatSnap.empty ? chatSnap.docs.map(d => d.data() as ChatMessage) : (legacyWorkspace?.chatMessages || []);
+            const remoteNotices = !noticeSnap.empty ? noticeSnap.docs.map(d => d.data() as AcademicNotice) : (legacyWorkspace?.notices || []);
+            const remoteStudies = !studySnap.empty ? studySnap.docs.map(d => d.data() as StudySubject) : (legacyWorkspace?.studySubjects || []);
+            const remoteExams = !examSnap.empty ? examSnap.docs.map(d => d.data() as ExamSchedule) : (legacyWorkspace?.examSchedules || []);
+            const remoteResources = !resSnap.empty ? resSnap.docs.map(d => d.data() as GoogleResourceLink) : (legacyWorkspace?.googleResources || []);
+
+            // Bidirectional smart merge:
+            // Combines remote data with local data, preserving local creations and remote records
+            const mergedPatients = mergeRecords(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
+            mergedPatients.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            patientsRef.current = mergedPatients;
+            setPatients(mergedPatients);
+            saveToStorage('patients', mergedPatients);
+
+            const mergedAppointments = mergeRecords(appointmentsRef.current, remoteAppointments, deletedAppointmentIdsRef.current);
+            mergedAppointments.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+            appointmentsRef.current = mergedAppointments;
+            setAppointments(mergedAppointments);
+            saveToStorage('appointments', mergedAppointments);
+
+            const mergedTasks = mergeRecords(tasksRef.current, remoteTasks, deletedTaskIdsRef.current);
+            mergedTasks.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            tasksRef.current = mergedTasks;
+            setTasks(mergedTasks);
+            saveToStorage('tasks', mergedTasks);
+
+            const mergedChat = mergeRecords(chatMessagesRef.current, remoteChat, new Set<string>());
+            mergedChat.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+            chatMessagesRef.current = mergedChat;
+            setChatMessages(mergedChat);
+            saveToStorage('chat_messages', mergedChat);
+
+            const mergedNotices = mergeRecords(noticesRef.current, remoteNotices, new Set<string>());
+            noticesRef.current = mergedNotices;
+            setNotices(mergedNotices);
+            saveToStorage('notices', mergedNotices);
+
+            const mergedStudies = mergeRecords(studySubjectsRef.current, remoteStudies, new Set<string>());
+            studySubjectsRef.current = mergedStudies;
+            setStudySubjects(mergedStudies);
+            saveToStorage('study_subjects', mergedStudies);
+
+            const mergedExams = mergeRecords(examSchedulesRef.current, remoteExams, new Set<string>());
+            examSchedulesRef.current = mergedExams;
+            setExamSchedules(mergedExams);
+            saveToStorage('exam_schedules', mergedExams);
+
+            const mergedResources = mergeRecords(googleResourcesRef.current, remoteResources, new Set<string>());
+            googleResourcesRef.current = mergedResources;
+            setGoogleResources(mergedResources);
+            saveToStorage('google_resources', mergedResources);
+
+            if (studentSnap.exists() && studentSnap.data()?.name) {
+              const data = studentSnap.data() as StudentProfile;
+              currentStudentRef.current = data;
+              setCurrentStudent(data);
+              saveToStorage('student_profile', data);
+            } else if (legacyWorkspace?.student?.name) {
+              currentStudentRef.current = legacyWorkspace.student;
+              setCurrentStudent(legacyWorkspace.student);
+              saveToStorage('student_profile', legacyWorkspace.student);
+            }
+
+            if (duplaSnap.exists() && duplaSnap.data()?.name) {
+              const data = duplaSnap.data() as DuplaPartner;
+              duplaPartnerRef.current = data;
+              setDuplaPartner(data);
+              saveToStorage('dupla_partner', data);
+            } else if (legacyWorkspace?.dupla?.name) {
+              duplaPartnerRef.current = legacyWorkspace.dupla;
+              setDuplaPartner(legacyWorkspace.dupla);
+              saveToStorage('dupla_partner', legacyWorkspace.dupla);
+            }
+
+            if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
+              const list = discSnap.data().list as DisciplineConfig[];
+              disciplinesRef.current = list;
+              setDisciplines(list);
+              saveToStorage('disciplines', list);
+            } else if (Array.isArray(legacyWorkspace?.disciplines) && legacyWorkspace.disciplines.length > 0) {
+              disciplinesRef.current = legacyWorkspace.disciplines;
+              setDisciplines(legacyWorkspace.disciplines);
+              saveToStorage('disciplines', legacyWorkspace.disciplines);
+            }
+
+            sourceName = 'Firebase';
+
+            // CRITICAL STEP FOR MULTI-DEVICE SYNC:
+            // Ensure Firestore collections and main_workspace contain all merged records so any other device (mobile/PC) immediately gets them
+            firestoreSaveAllEntities({
+              patients: mergedPatients,
+              appointments: mergedAppointments,
+              tasks: mergedTasks,
+              chatMessages: mergedChat,
+              disciplines: disciplinesRef.current,
+              notices: mergedNotices,
+              studySubjects: mergedStudies,
+              examSchedules: mergedExams,
+              googleResources: mergedResources,
+              student: currentStudentRef.current,
+              dupla: duplaPartnerRef.current,
+              settings: { darkMode, privacyMode, userPin },
+              updatedAt: Date.now()
+            }).catch((err) => console.warn('[Firestore] Boot upload sync warning:', err));
           } catch (e) {
             console.warn('[Firestore] Boot query warning:', e);
           }
@@ -1269,6 +1250,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const db = dbRef.current || getFirebaseDB();
       if (db) {
+        // 1. Push all current local state to Firestore first (ensure no local updates are missed)
+        await firestoreSaveAllEntities({
+          patients: patientsRef.current,
+          appointments: appointmentsRef.current,
+          tasks: tasksRef.current,
+          chatMessages: chatMessagesRef.current,
+          disciplines: disciplinesRef.current,
+          notices: noticesRef.current,
+          studySubjects: studySubjectsRef.current,
+          examSchedules: examSchedulesRef.current,
+          googleResources: googleResourcesRef.current,
+          student: currentStudentRef.current,
+          dupla: duplaPartnerRef.current,
+          settings: { darkMode, privacyMode, userPin },
+          updatedAt: Date.now()
+        }).catch((e) => console.warn('[Firestore] Pre-sync upload warning:', e));
+
+        // 2. Fetch latest remote state from Firestore
         const [
           patSnap,
           aptSnap,
@@ -1295,96 +1294,97 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           getDoc(doc(db, 'odonto_config', 'disciplines'))
         ]);
 
-        const hasGranularData = !patSnap.empty || !aptSnap.empty || !taskSnap.empty;
+        isInternalChange.current = true;
+        const remotePatients = !patSnap.empty ? patSnap.docs.map(d => d.data() as Patient) : [];
+        const remoteAppointments = !aptSnap.empty ? aptSnap.docs.map(d => d.data() as Appointment) : [];
+        const remoteTasks = !taskSnap.empty ? taskSnap.docs.map(d => d.data() as TaskItem) : [];
+        const remoteChat = !chatSnap.empty ? chatSnap.docs.map(d => d.data() as ChatMessage) : [];
+        const remoteNotices = !noticeSnap.empty ? noticeSnap.docs.map(d => d.data() as AcademicNotice) : [];
+        const remoteStudies = !studySnap.empty ? studySnap.docs.map(d => d.data() as StudySubject) : [];
+        const remoteExams = !examSnap.empty ? examSnap.docs.map(d => d.data() as ExamSchedule) : [];
+        const remoteResources = !resSnap.empty ? resSnap.docs.map(d => d.data() as GoogleResourceLink) : [];
 
-        if (hasGranularData) {
-          isInternalChange.current = true;
-          if (!patSnap.empty) {
-            const list = patSnap.docs.map((d) => d.data() as Patient);
-            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            patientsRef.current = list;
-            setPatients(list);
-            saveToStorage('patients', list);
-          }
-          if (!aptSnap.empty) {
-            const list = aptSnap.docs.map((d) => d.data() as Appointment);
-            list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
-            appointmentsRef.current = list;
-            setAppointments(list);
-            saveToStorage('appointments', list);
-          }
-          if (!taskSnap.empty) {
-            const list = taskSnap.docs.map((d) => d.data() as TaskItem);
-            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-            tasksRef.current = list;
-            setTasks(list);
-            saveToStorage('tasks', list);
-          }
-          if (!chatSnap.empty) {
-            const list = chatSnap.docs.map((d) => d.data() as ChatMessage);
-            list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
-            chatMessagesRef.current = list;
-            setChatMessages(list);
-            saveToStorage('chat_messages', list);
-          }
-          if (!noticeSnap.empty) {
-            const list = noticeSnap.docs.map((d) => d.data() as AcademicNotice);
-            noticesRef.current = list;
-            setNotices(list);
-            saveToStorage('notices', list);
-          }
-          if (!studySnap.empty) {
-            const list = studySnap.docs.map((d) => d.data() as StudySubject);
-            studySubjectsRef.current = list;
-            setStudySubjects(list);
-            saveToStorage('study_subjects', list);
-          }
-          if (!examSnap.empty) {
-            const list = examSnap.docs.map((d) => d.data() as ExamSchedule);
-            examSchedulesRef.current = list;
-            setExamSchedules(list);
-            saveToStorage('exam_schedules', list);
-          }
-          if (!resSnap.empty) {
-            const list = resSnap.docs.map((d) => d.data() as GoogleResourceLink);
-            googleResourcesRef.current = list;
-            setGoogleResources(list);
-            saveToStorage('google_resources', list);
-          }
-          if (studentSnap.exists() && studentSnap.data()?.name) {
-            const data = studentSnap.data() as StudentProfile;
-            currentStudentRef.current = data;
-            setCurrentStudent(data);
-            saveToStorage('student_profile', data);
-          }
-          if (duplaSnap.exists() && duplaSnap.data()?.name) {
-            const data = duplaSnap.data() as DuplaPartner;
-            duplaPartnerRef.current = data;
-            setDuplaPartner(data);
-            saveToStorage('dupla_partner', data);
-          }
-          if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
-            disciplinesRef.current = discSnap.data().list as DisciplineConfig[];
-            setDisciplines(discSnap.data().list as DisciplineConfig[]);
-            saveToStorage('disciplines', discSnap.data().list);
-          }
-          setTimeout(() => {
-            isInternalChange.current = false;
-          }, 150);
-        } else {
-          // Push local state to collections
-          patientsRef.current.forEach((p) => firestoreSavePatient(p));
-          appointmentsRef.current.forEach((a) => firestoreSaveAppointment(a));
-          tasksRef.current.forEach((t) => firestoreSaveTask(t));
-          chatMessagesRef.current.forEach((m) => firestoreSaveChatMessage(m));
-          noticesRef.current.forEach((n) => firestoreSaveNotice(n));
-          studySubjectsRef.current.forEach((s) => firestoreSaveStudySubject(s));
-          examSchedulesRef.current.forEach((e) => firestoreSaveExamSchedule(e));
-          googleResourcesRef.current.forEach((r) => firestoreSaveResource(r));
-          firestoreSaveConfig('student', currentStudentRef.current);
-          firestoreSaveConfig('dupla', duplaPartnerRef.current);
-          firestoreSaveConfig('disciplines', { list: disciplinesRef.current });
+        const mergedPatients = mergeRecords(patientsRef.current, remotePatients, deletedPatientIdsRef.current);
+        mergedPatients.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        patientsRef.current = mergedPatients;
+        setPatients(mergedPatients);
+        saveToStorage('patients', mergedPatients);
+
+        const mergedAppointments = mergeRecords(appointmentsRef.current, remoteAppointments, deletedAppointmentIdsRef.current);
+        mergedAppointments.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+        appointmentsRef.current = mergedAppointments;
+        setAppointments(mergedAppointments);
+        saveToStorage('appointments', mergedAppointments);
+
+        const mergedTasks = mergeRecords(tasksRef.current, remoteTasks, deletedTaskIdsRef.current);
+        mergedTasks.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        tasksRef.current = mergedTasks;
+        setTasks(mergedTasks);
+        saveToStorage('tasks', mergedTasks);
+
+        const mergedChat = mergeRecords(chatMessagesRef.current, remoteChat, new Set<string>());
+        mergedChat.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+        chatMessagesRef.current = mergedChat;
+        setChatMessages(mergedChat);
+        saveToStorage('chat_messages', mergedChat);
+
+        const mergedNotices = mergeRecords(noticesRef.current, remoteNotices, new Set<string>());
+        noticesRef.current = mergedNotices;
+        setNotices(mergedNotices);
+        saveToStorage('notices', mergedNotices);
+
+        const mergedStudies = mergeRecords(studySubjectsRef.current, remoteStudies, new Set<string>());
+        studySubjectsRef.current = mergedStudies;
+        setStudySubjects(mergedStudies);
+        saveToStorage('study_subjects', mergedStudies);
+
+        const mergedExams = mergeRecords(examSchedulesRef.current, remoteExams, new Set<string>());
+        examSchedulesRef.current = mergedExams;
+        setExamSchedules(mergedExams);
+        saveToStorage('exam_schedules', mergedExams);
+
+        const mergedResources = mergeRecords(googleResourcesRef.current, remoteResources, new Set<string>());
+        googleResourcesRef.current = mergedResources;
+        setGoogleResources(mergedResources);
+        saveToStorage('google_resources', mergedResources);
+
+        if (studentSnap.exists() && studentSnap.data()?.name) {
+          const data = studentSnap.data() as StudentProfile;
+          currentStudentRef.current = data;
+          setCurrentStudent(data);
+          saveToStorage('student_profile', data);
         }
+        if (duplaSnap.exists() && duplaSnap.data()?.name) {
+          const data = duplaSnap.data() as DuplaPartner;
+          duplaPartnerRef.current = data;
+          setDuplaPartner(data);
+          saveToStorage('dupla_partner', data);
+        }
+        if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
+          disciplinesRef.current = discSnap.data().list as DisciplineConfig[];
+          setDisciplines(discSnap.data().list as DisciplineConfig[]);
+          saveToStorage('disciplines', discSnap.data().list);
+        }
+
+        // Push merged state back to server and cloud
+        pushCloudState({
+          patients: mergedPatients,
+          appointments: mergedAppointments,
+          tasks: mergedTasks,
+          chatMessages: mergedChat,
+          disciplines: disciplinesRef.current,
+          notices: mergedNotices,
+          studySubjects: mergedStudies,
+          examSchedules: mergedExams,
+          googleResources: mergedResources,
+          student: currentStudentRef.current,
+          dupla: duplaPartnerRef.current,
+          senderId: getOrCreateDeviceId()
+        } as any).catch(() => {});
+
+        setTimeout(() => {
+          isInternalChange.current = false;
+        }, 150);
       }
 
       setSyncStatus('synced');

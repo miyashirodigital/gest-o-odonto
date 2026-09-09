@@ -378,6 +378,93 @@ export async function firestoreSaveConfig(key: string, data: any): Promise<boole
   }
 }
 
+export async function firestoreBatchSave(collectionName: string, items: any[]): Promise<boolean> {
+  const db = getFirebaseDB();
+  if (!db || !Array.isArray(items) || items.length === 0) return true;
+  try {
+    const chunkSize = 400;
+    for (let i = 0; i < items.length; i += chunkSize) {
+      const chunk = items.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        if (item && item.id) {
+          const ref = doc(db, collectionName, String(item.id));
+          batch.set(ref, item, { merge: true });
+        }
+      }
+      await batch.commit();
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[Firestore] Error batch saving ${collectionName}:`, err);
+    try {
+      await Promise.all(items.map(item => {
+        if (item && item.id) {
+          return setDoc(doc(db, collectionName, String(item.id)), item, { merge: true });
+        }
+        return Promise.resolve();
+      }));
+      return true;
+    } catch (e2) {
+      console.warn(`[Firestore] Fallback individual saves failed for ${collectionName}:`, e2);
+      return false;
+    }
+  }
+}
+
+export async function firestoreSaveAllEntities(state: any): Promise<boolean> {
+  const db = getFirebaseDB();
+  if (!db) return false;
+  try {
+    const promises: Promise<any>[] = [];
+
+    if (Array.isArray(state.patients) && state.patients.length > 0) {
+      promises.push(firestoreBatchSave('odonto_patients', state.patients));
+    }
+    if (Array.isArray(state.appointments) && state.appointments.length > 0) {
+      promises.push(firestoreBatchSave('odonto_appointments', state.appointments));
+    }
+    if (Array.isArray(state.tasks) && state.tasks.length > 0) {
+      promises.push(firestoreBatchSave('odonto_tasks', state.tasks));
+    }
+    if (Array.isArray(state.chatMessages) && state.chatMessages.length > 0) {
+      promises.push(firestoreBatchSave('odonto_chat', state.chatMessages));
+    }
+    if (Array.isArray(state.notices) && state.notices.length > 0) {
+      promises.push(firestoreBatchSave('odonto_notices', state.notices));
+    }
+    if (Array.isArray(state.studySubjects) && state.studySubjects.length > 0) {
+      promises.push(firestoreBatchSave('odonto_studies', state.studySubjects));
+    }
+    if (Array.isArray(state.examSchedules) && state.examSchedules.length > 0) {
+      promises.push(firestoreBatchSave('odonto_exams', state.examSchedules));
+    }
+    if (Array.isArray(state.googleResources) && state.googleResources.length > 0) {
+      promises.push(firestoreBatchSave('odonto_resources', state.googleResources));
+    }
+    if (state.student) {
+      promises.push(firestoreSaveConfig('student', state.student));
+    }
+    if (state.dupla) {
+      promises.push(firestoreSaveConfig('dupla', state.dupla));
+    }
+    if (state.disciplines) {
+      promises.push(firestoreSaveConfig('disciplines', { list: state.disciplines }));
+    }
+
+    promises.push(setDoc(doc(db, 'odonto_clinic', 'main_workspace'), {
+      ...state,
+      updatedAt: new Date().toISOString()
+    }, { merge: true }));
+
+    await Promise.all(promises);
+    return true;
+  } catch (err) {
+    console.warn('[Firestore] Error saving all entities:', err);
+    return false;
+  }
+}
+
 // Broadcast Channel for Instant Multi-Tab Real-time Sync
 export const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('odonto_realtime_sync_channel')

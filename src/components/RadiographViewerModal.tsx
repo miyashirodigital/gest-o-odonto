@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { RadiographExam } from '../types';
 import { 
   X, 
@@ -31,6 +31,45 @@ export const RadiographViewerModal: React.FC<RadiographViewerModalProps> = ({ ex
   const [compareExamId, setCompareExamId] = useState<string | null>(null);
 
   const compareExam = allExams.find(e => e.id === compareExamId);
+
+  const touchStartDistRef = useRef<number | null>(null);
+  const touchStartZoomRef = useRef<number>(1);
+  const lastTapRef = useRef<number>(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      touchStartZoomRef.current = zoom;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && touchStartDistRef.current !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const ratio = dist / touchStartDistRef.current;
+      const newZoom = Math.min(Math.max(touchStartZoomRef.current * ratio, 0.5), 3.5);
+      setZoom(Number(newZoom.toFixed(2)));
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartDistRef.current = null;
+  };
+
+  const handleDoubleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      setZoom((prev) => (prev > 1.2 ? 1 : 2));
+    }
+    lastTapRef.current = now;
+  };
 
   const resetFilters = () => {
     setZoom(1);
@@ -178,7 +217,13 @@ export const RadiographViewerModal: React.FC<RadiographViewerModalProps> = ({ ex
         {/* Main Canvas Viewport (Single or Side-by-Side Comparison) */}
         <div className="flex-1 overflow-hidden relative flex flex-col md:flex-row bg-black/80">
           {/* Main Image Stage */}
-          <div className="flex-1 h-full overflow-auto flex items-center justify-center p-4 relative select-none">
+          <div 
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onClick={handleDoubleTap}
+            className="flex-1 h-full overflow-auto flex items-center justify-center p-4 relative select-none radiograph-zoom-stage cursor-zoom-in"
+          >
             <img
               src={currentExam.imageUrl}
               alt={currentExam.title}
