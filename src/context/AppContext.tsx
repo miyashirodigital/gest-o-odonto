@@ -39,9 +39,26 @@ import {
   saveFirebaseConfig,
   broadcastStateChange,
   syncChannel,
-  FirebaseCustomConfig
+  FirebaseCustomConfig,
+  firestoreSavePatient,
+  firestoreDeletePatient,
+  firestoreSaveAppointment,
+  firestoreDeleteAppointment,
+  firestoreSaveTask,
+  firestoreDeleteTask,
+  firestoreSaveChatMessage,
+  firestoreDeleteChatMessage,
+  firestoreSaveNotice,
+  firestoreDeleteNotice,
+  firestoreSaveStudySubject,
+  firestoreDeleteStudySubject,
+  firestoreSaveExamSchedule,
+  firestoreDeleteExamSchedule,
+  firestoreSaveResource,
+  firestoreDeleteResource,
+  firestoreSaveConfig
 } from '../utils/firebase';
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import {
   fetchCloudState,
   pushCloudState,
@@ -426,12 +443,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }).catch((e) => console.warn('[CloudSync] Server push warning:', e));
 
-      // 2. Push to Firebase Firestore (permanent cloud database across all devices)
+      // 2. Push to Firebase Firestore (permanent granular cloud collections across all devices)
       const db = dbRef.current || getFirebaseDB();
       if (db) {
         try {
+          if (explicitOverrides?.patients) {
+            explicitOverrides.patients.forEach((p) => firestoreSavePatient(p));
+          }
+          if (explicitOverrides?.appointments) {
+            explicitOverrides.appointments.forEach((a) => firestoreSaveAppointment(a));
+          }
+          if (explicitOverrides?.tasks) {
+            explicitOverrides.tasks.forEach((t) => firestoreSaveTask(t));
+          }
+          if (explicitOverrides?.chatMessages) {
+            explicitOverrides.chatMessages.forEach((m) => firestoreSaveChatMessage(m));
+          }
+          if (explicitOverrides?.notices) {
+            explicitOverrides.notices.forEach((n) => firestoreSaveNotice(n));
+          }
+          if (explicitOverrides?.studySubjects) {
+            explicitOverrides.studySubjects.forEach((s) => firestoreSaveStudySubject(s));
+          }
+          if (explicitOverrides?.examSchedules) {
+            explicitOverrides.examSchedules.forEach((e) => firestoreSaveExamSchedule(e));
+          }
+          if (explicitOverrides?.googleResources) {
+            explicitOverrides.googleResources.forEach((r) => firestoreSaveResource(r));
+          }
+          if (explicitOverrides?.student) {
+            firestoreSaveConfig('student', explicitOverrides.student);
+          }
+          if (explicitOverrides?.dupla) {
+            firestoreSaveConfig('dupla', explicitOverrides.dupla);
+          }
+          if (explicitOverrides?.disciplines) {
+            firestoreSaveConfig('disciplines', { list: explicitOverrides.disciplines });
+          }
+
+          // Also keep legacy main_workspace updated as fallback snapshot
           const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-          await setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true });
+          setDoc(docRef, { ...payload, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+
           setSyncStatus('synced');
           const now = new Date();
           setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
@@ -451,150 +504,217 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const pushToCloudState = syncStateToCloudAndFirestore;
   const pushToFirestore = () => syncStateToCloudAndFirestore(undefined, true);
 
-  // Load from Firebase Firestore on boot (Authoritative Single Source of Truth)
+  // Load from Firebase Firestore on boot (Authoritative Granular Single Source of Truth)
   useEffect(() => {
     let isCancelled = false;
 
     async function loadData() {
       isInternalChange.current = true;
       try {
-        let cloudData: any = null;
         let sourceName = '';
-
-        // 1. Primary check: Firestore document odonto_clinic/main_workspace
         const db = getFirebaseDB();
+
+        // 1. Primary check: Firestore collections
         if (db) {
           try {
-            const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-            const snap = await getDoc(docRef);
-            if (snap.exists()) {
-              const data = snap.data();
-              if (data) {
-                cloudData = data;
+            const [
+              patSnap,
+              aptSnap,
+              taskSnap,
+              chatSnap,
+              noticeSnap,
+              studySnap,
+              examSnap,
+              resSnap,
+              studentSnap,
+              duplaSnap,
+              discSnap
+            ] = await Promise.all([
+              getDocs(collection(db, 'odonto_patients')),
+              getDocs(collection(db, 'odonto_appointments')),
+              getDocs(collection(db, 'odonto_tasks')),
+              getDocs(collection(db, 'odonto_chat')),
+              getDocs(collection(db, 'odonto_notices')),
+              getDocs(collection(db, 'odonto_studies')),
+              getDocs(collection(db, 'odonto_exams')),
+              getDocs(collection(db, 'odonto_resources')),
+              getDoc(doc(db, 'odonto_config', 'student')),
+              getDoc(doc(db, 'odonto_config', 'dupla')),
+              getDoc(doc(db, 'odonto_config', 'disciplines'))
+            ]);
+
+            if (isCancelled) return;
+
+            const hasGranularData = !patSnap.empty || !aptSnap.empty || !taskSnap.empty;
+
+            if (hasGranularData) {
+              sourceName = 'Firebase';
+              if (!patSnap.empty) {
+                const list = patSnap.docs.map((d) => d.data() as Patient);
+                list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+                patientsRef.current = list;
+                setPatients(list);
+                saveToStorage('patients', list);
+              }
+              if (!aptSnap.empty) {
+                const list = aptSnap.docs.map((d) => d.data() as Appointment);
+                list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+                appointmentsRef.current = list;
+                setAppointments(list);
+                saveToStorage('appointments', list);
+              }
+              if (!taskSnap.empty) {
+                const list = taskSnap.docs.map((d) => d.data() as TaskItem);
+                tasksRef.current = list;
+                setTasks(list);
+                saveToStorage('tasks', list);
+              }
+              if (!chatSnap.empty) {
+                const list = chatSnap.docs.map((d) => d.data() as ChatMessage);
+                chatMessagesRef.current = list;
+                setChatMessages(list);
+                saveToStorage('chat_messages', list);
+              }
+              if (!noticeSnap.empty) {
+                const list = noticeSnap.docs.map((d) => d.data() as AcademicNotice);
+                noticesRef.current = list;
+                setNotices(list);
+                saveToStorage('notices', list);
+              }
+              if (!studySnap.empty) {
+                const list = studySnap.docs.map((d) => d.data() as StudySubject);
+                studySubjectsRef.current = list;
+                setStudySubjects(list);
+                saveToStorage('study_subjects', list);
+              }
+              if (!examSnap.empty) {
+                const list = examSnap.docs.map((d) => d.data() as ExamSchedule);
+                examSchedulesRef.current = list;
+                setExamSchedules(list);
+                saveToStorage('exam_schedules', list);
+              }
+              if (!resSnap.empty) {
+                const list = resSnap.docs.map((d) => d.data() as GoogleResourceLink);
+                googleResourcesRef.current = list;
+                setGoogleResources(list);
+                saveToStorage('google_resources', list);
+              }
+              if (studentSnap.exists() && studentSnap.data()?.name) {
+                const data = studentSnap.data() as StudentProfile;
+                currentStudentRef.current = data;
+                setCurrentStudent(data);
+                saveToStorage('student_profile', data);
+              }
+              if (duplaSnap.exists() && duplaSnap.data()?.name) {
+                const data = duplaSnap.data() as DuplaPartner;
+                duplaPartnerRef.current = data;
+                setDuplaPartner(data);
+                saveToStorage('dupla_partner', data);
+              }
+              if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
+                const list = discSnap.data().list as DisciplineConfig[];
+                disciplinesRef.current = list;
+                setDisciplines(list);
+                saveToStorage('disciplines', list);
+              }
+            } else {
+              // Check if legacy odonto_clinic/main_workspace has data to migrate
+              const legacySnap = await getDoc(doc(db, 'odonto_clinic', 'main_workspace'));
+              if (legacySnap.exists() && legacySnap.data()) {
+                const legacy = legacySnap.data()!;
                 sourceName = 'Firebase';
+                if (Array.isArray(legacy.patients) && legacy.patients.length > 0) {
+                  legacy.patients.forEach((p: any) => firestoreSavePatient(p));
+                  patientsRef.current = legacy.patients;
+                  setPatients(legacy.patients);
+                  saveToStorage('patients', legacy.patients);
+                }
+                if (Array.isArray(legacy.appointments) && legacy.appointments.length > 0) {
+                  legacy.appointments.forEach((a: any) => firestoreSaveAppointment(a));
+                  appointmentsRef.current = legacy.appointments;
+                  setAppointments(legacy.appointments);
+                  saveToStorage('appointments', legacy.appointments);
+                }
+                if (Array.isArray(legacy.tasks) && legacy.tasks.length > 0) {
+                  legacy.tasks.forEach((t: any) => firestoreSaveTask(t));
+                  tasksRef.current = legacy.tasks;
+                  setTasks(legacy.tasks);
+                  saveToStorage('tasks', legacy.tasks);
+                }
+                if (Array.isArray(legacy.chatMessages) && legacy.chatMessages.length > 0) {
+                  legacy.chatMessages.forEach((m: any) => firestoreSaveChatMessage(m));
+                  chatMessagesRef.current = legacy.chatMessages;
+                  setChatMessages(legacy.chatMessages);
+                  saveToStorage('chat_messages', legacy.chatMessages);
+                }
+                if (Array.isArray(legacy.notices) && legacy.notices.length > 0) {
+                  legacy.notices.forEach((n: any) => firestoreSaveNotice(n));
+                  noticesRef.current = legacy.notices;
+                  setNotices(legacy.notices);
+                  saveToStorage('notices', legacy.notices);
+                }
+                if (legacy.student) {
+                  firestoreSaveConfig('student', legacy.student);
+                  currentStudentRef.current = legacy.student;
+                  setCurrentStudent(legacy.student);
+                  saveToStorage('student_profile', legacy.student);
+                }
+                if (legacy.dupla) {
+                  firestoreSaveConfig('dupla', legacy.dupla);
+                  duplaPartnerRef.current = legacy.dupla;
+                  setDuplaPartner(legacy.dupla);
+                  saveToStorage('dupla_partner', legacy.dupla);
+                }
+              } else {
+                // If completely empty in Firebase, seed local initial data into collections so other devices get it
+                patientsRef.current.forEach((p) => firestoreSavePatient(p));
+                appointmentsRef.current.forEach((a) => firestoreSaveAppointment(a));
+                tasksRef.current.forEach((t) => firestoreSaveTask(t));
+                chatMessagesRef.current.forEach((m) => firestoreSaveChatMessage(m));
+                noticesRef.current.forEach((n) => firestoreSaveNotice(n));
+                studySubjectsRef.current.forEach((s) => firestoreSaveStudySubject(s));
+                examSchedulesRef.current.forEach((e) => firestoreSaveExamSchedule(e));
+                googleResourcesRef.current.forEach((r) => firestoreSaveResource(r));
+                firestoreSaveConfig('student', currentStudentRef.current);
+                firestoreSaveConfig('dupla', duplaPartnerRef.current);
+                firestoreSaveConfig('disciplines', { list: disciplinesRef.current });
               }
             }
           } catch (e) {
-            console.warn('[Firestore] Boot getDoc warning:', e);
+            console.warn('[Firestore] Boot query warning:', e);
           }
         }
 
-        // 2. Secondary check: Server persistent store
-        if (!cloudData) {
+        // Secondary fallback: Server sync
+        if (!sourceName) {
           try {
             const { state: cloudState, connectedDevices } = await fetchCloudState();
             if (connectedDevices) setConnectedDevicesCount(connectedDevices);
             if (cloudState && (cloudState.patients || cloudState.student || cloudState.dupla || cloudState.appointments)) {
-              cloudData = cloudState;
               sourceName = 'Nuvem';
+              if (Array.isArray(cloudState.patients)) {
+                patientsRef.current = cloudState.patients;
+                setPatients(cloudState.patients);
+                saveToStorage('patients', cloudState.patients);
+              }
+              if (Array.isArray(cloudState.appointments)) {
+                appointmentsRef.current = cloudState.appointments;
+                setAppointments(cloudState.appointments);
+                saveToStorage('appointments', cloudState.appointments);
+              }
+              if (Array.isArray(cloudState.tasks)) {
+                tasksRef.current = cloudState.tasks;
+                setTasks(cloudState.tasks);
+                saveToStorage('tasks', cloudState.tasks);
+              }
             }
           } catch (e) {
             console.warn('[CloudSync] Boot fetch warning:', e);
           }
         }
 
-        if (isCancelled) return;
-
-        // If cloud data exists, merge it non-destructively so local items are never wiped
-        if (cloudData) {
-          if (Array.isArray(cloudData.patients)) {
-            const merged = mergeRecords(patientsRef.current, cloudData.patients, deletedPatientIdsRef.current);
-            patientsRef.current = merged;
-            setPatients(merged);
-            saveToStorage('patients', merged);
-          }
-          if (Array.isArray(cloudData.appointments)) {
-            const merged = mergeRecords(appointmentsRef.current, cloudData.appointments, deletedAppointmentIdsRef.current);
-            appointmentsRef.current = merged;
-            setAppointments(merged);
-            saveToStorage('appointments', merged);
-          }
-          if (Array.isArray(cloudData.tasks)) {
-            const merged = mergeRecords(tasksRef.current, cloudData.tasks, deletedTaskIdsRef.current);
-            tasksRef.current = merged;
-            setTasks(merged);
-            saveToStorage('tasks', merged);
-          }
-          if (Array.isArray(cloudData.chatMessages)) {
-            const merged = mergeRecords(chatMessagesRef.current, cloudData.chatMessages, new Set());
-            chatMessagesRef.current = merged;
-            setChatMessages(merged);
-            saveToStorage('chat_messages', merged);
-          }
-          if (Array.isArray(cloudData.disciplines) && cloudData.disciplines.length > 0) {
-            disciplinesRef.current = cloudData.disciplines;
-            setDisciplines(cloudData.disciplines);
-            saveToStorage('disciplines', cloudData.disciplines);
-          }
-          if (Array.isArray(cloudData.notices)) {
-            const merged = mergeRecords(noticesRef.current, cloudData.notices, new Set());
-            noticesRef.current = merged;
-            setNotices(merged);
-            saveToStorage('notices', merged);
-          }
-          if (Array.isArray(cloudData.studySubjects)) {
-            const merged = mergeRecords(studySubjectsRef.current, cloudData.studySubjects, new Set());
-            studySubjectsRef.current = merged;
-            setStudySubjects(merged);
-            saveToStorage('study_subjects', merged);
-          }
-          if (Array.isArray(cloudData.examSchedules)) {
-            const merged = mergeRecords(examSchedulesRef.current, cloudData.examSchedules, new Set());
-            examSchedulesRef.current = merged;
-            setExamSchedules(merged);
-            saveToStorage('exam_schedules', merged);
-          }
-          if (Array.isArray(cloudData.googleResources)) {
-            const merged = mergeRecords(googleResourcesRef.current, cloudData.googleResources, new Set());
-            googleResourcesRef.current = merged;
-            setGoogleResources(merged);
-            saveToStorage('google_resources', merged);
-          }
-          if (cloudData.student) {
-            currentStudentRef.current = cloudData.student;
-            setCurrentStudent(cloudData.student);
-            saveToStorage('student_profile', cloudData.student);
-          }
-          if (cloudData.dupla) {
-            duplaPartnerRef.current = cloudData.dupla;
-            setDuplaPartner(cloudData.dupla);
-            saveToStorage('dupla_partner', cloudData.dupla);
-          }
-          if (cloudData.settings) {
-            if (typeof cloudData.settings.darkMode === 'boolean') setDarkMode(cloudData.settings.darkMode);
-            if (typeof cloudData.settings.privacyMode === 'boolean') setPrivacyMode(cloudData.settings.privacyMode);
-            if (cloudData.settings.userPin) setUserPinState(cloudData.settings.userPin);
-          }
-        } else {
-          // Initial push to cloud if remote was empty
-          const initialPayload: CloudClinicState = {
-            patients: patientsRef.current,
-            appointments: appointmentsRef.current,
-            tasks: tasksRef.current,
-            chatMessages: chatMessagesRef.current,
-            disciplines: disciplinesRef.current,
-            notices: noticesRef.current,
-            studySubjects: studySubjectsRef.current,
-            examSchedules: examSchedulesRef.current,
-            googleResources: googleResourcesRef.current,
-            student: currentStudentRef.current,
-            dupla: duplaPartnerRef.current,
-            settings: { darkMode, privacyMode, userPin },
-            updatedAt: Date.now()
-          };
-          pushCloudState(initialPayload);
-          if (db) {
-            try {
-              const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-              setDoc(docRef, { ...initialPayload, updatedAt: new Date().toISOString() }, { merge: true });
-            } catch (e) {
-              console.warn('[Firestore] Initial push warning:', e);
-            }
-          }
-        }
-
         const now = new Date();
-        setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (${sourceName || 'Nuvem'})`);
+        setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (${sourceName || 'Local'})`);
         setSyncStatus('synced');
       } catch (err) {
         console.warn('Error loading from storage / cloud:', err);
@@ -762,99 +882,171 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsFirebaseActive(!!db);
   }, [firebaseCustomConfig]);
 
-  // Firestore Real-Time Listeners (Sync from Firebase with conflict-free merge)
+  // Firestore Real-Time Granular Collection Listeners (Permanent Instant Multi-Device Sync)
   useEffect(() => {
     const db = dbRef.current || getFirebaseDB();
     if (!db) return;
 
+    const unsubscribers: (() => void)[] = [];
+
     try {
-      const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-      const unsubscribe = onSnapshot(docRef, (snapshot) => {
-        if (snapshot.exists()) {
-          // If this snapshot has pending uncommitted writes locally, do not overwrite
-          if (snapshot.metadata.hasPendingWrites) {
-            return;
-          }
-          const data = snapshot.data();
-          if (data) {
-            isInternalChange.current = true;
-            if (Array.isArray(data.patients)) {
-              const merged = mergeRecords(patientsRef.current, data.patients, deletedPatientIdsRef.current);
-              patientsRef.current = merged;
-              setPatients(merged);
-              saveToStorage('patients', merged);
-            }
-            if (Array.isArray(data.appointments)) {
-              const merged = mergeRecords(appointmentsRef.current, data.appointments, deletedAppointmentIdsRef.current);
-              appointmentsRef.current = merged;
-              setAppointments(merged);
-              saveToStorage('appointments', data.appointments);
-            }
-            if (Array.isArray(data.tasks)) {
-              const merged = mergeRecords(tasksRef.current, data.tasks, deletedTaskIdsRef.current);
-              tasksRef.current = merged;
-              setTasks(merged);
-              saveToStorage('tasks', merged);
-            }
-            if (Array.isArray(data.chatMessages)) {
-              const merged = mergeRecords(chatMessagesRef.current, data.chatMessages, new Set());
-              chatMessagesRef.current = merged;
-              setChatMessages(merged);
-              saveToStorage('chat_messages', merged);
-            }
-            if (Array.isArray(data.disciplines) && data.disciplines.length > 0) {
-              disciplinesRef.current = data.disciplines as DisciplineConfig[];
-              setDisciplines(data.disciplines as DisciplineConfig[]);
-              saveToStorage('disciplines', data.disciplines);
-            }
-            if (Array.isArray(data.notices)) {
-              const merged = mergeRecords(noticesRef.current, data.notices, new Set());
-              noticesRef.current = merged;
-              setNotices(merged);
-              saveToStorage('notices', merged);
-            }
-            if (Array.isArray(data.studySubjects)) {
-              const merged = mergeRecords(studySubjectsRef.current, data.studySubjects, new Set());
-              studySubjectsRef.current = merged;
-              setStudySubjects(merged);
-              saveToStorage('study_subjects', merged);
-            }
-            if (Array.isArray(data.examSchedules)) {
-              const merged = mergeRecords(examSchedulesRef.current, data.examSchedules, new Set());
-              examSchedulesRef.current = merged;
-              setExamSchedules(merged);
-              saveToStorage('exam_schedules', merged);
-            }
-            if (Array.isArray(data.googleResources)) {
-              const merged = mergeRecords(googleResourcesRef.current, data.googleResources, new Set());
-              googleResourcesRef.current = merged;
-              setGoogleResources(merged);
-              saveToStorage('google_resources', merged);
-            }
-            if (data.student) {
-              currentStudentRef.current = data.student;
-              setCurrentStudent(data.student);
-            }
-            if (data.dupla) {
-              duplaPartnerRef.current = data.dupla;
-              setDuplaPartner(data.dupla);
-            }
-            setSyncStatus('synced');
-            const now = new Date();
-            setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
-            setTimeout(() => {
-              isInternalChange.current = false;
-            }, 150);
+      // 1. Patients collection listener (real-time additions, updates, deletions)
+      const unsubPatients = onSnapshot(collection(db, 'odonto_patients'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as Patient);
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          isInternalChange.current = true;
+          patientsRef.current = list;
+          setPatients(list);
+          saveToStorage('patients', list);
+          setSyncStatus('synced');
+          const now = new Date();
+          setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Patients listener:', err));
+      unsubscribers.push(unsubPatients);
+
+      // 2. Appointments collection listener
+      const unsubAppointments = onSnapshot(collection(db, 'odonto_appointments'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as Appointment);
+          list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+          isInternalChange.current = true;
+          appointmentsRef.current = list;
+          setAppointments(list);
+          saveToStorage('appointments', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Appointments listener:', err));
+      unsubscribers.push(unsubAppointments);
+
+      // 3. Tasks collection listener
+      const unsubTasks = onSnapshot(collection(db, 'odonto_tasks'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as TaskItem);
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          isInternalChange.current = true;
+          tasksRef.current = list;
+          setTasks(list);
+          saveToStorage('tasks', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Tasks listener:', err));
+      unsubscribers.push(unsubTasks);
+
+      // 4. Chat messages collection listener
+      const unsubChat = onSnapshot(collection(db, 'odonto_chat'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as ChatMessage);
+          list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+          isInternalChange.current = true;
+          chatMessagesRef.current = list;
+          setChatMessages(list);
+          saveToStorage('chat_messages', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Chat listener:', err));
+      unsubscribers.push(unsubChat);
+
+      // 5. Academic Notices collection listener
+      const unsubNotices = onSnapshot(collection(db, 'odonto_notices'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as AcademicNotice);
+          isInternalChange.current = true;
+          noticesRef.current = list;
+          setNotices(list);
+          saveToStorage('notices', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Notices listener:', err));
+      unsubscribers.push(unsubNotices);
+
+      // 6. Studies collection listener
+      const unsubStudies = onSnapshot(collection(db, 'odonto_studies'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as StudySubject);
+          isInternalChange.current = true;
+          studySubjectsRef.current = list;
+          setStudySubjects(list);
+          saveToStorage('study_subjects', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Studies listener:', err));
+      unsubscribers.push(unsubStudies);
+
+      // 7. Exams collection listener
+      const unsubExams = onSnapshot(collection(db, 'odonto_exams'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as ExamSchedule);
+          isInternalChange.current = true;
+          examSchedulesRef.current = list;
+          setExamSchedules(list);
+          saveToStorage('exam_schedules', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Exams listener:', err));
+      unsubscribers.push(unsubExams);
+
+      // 8. Resources collection listener
+      const unsubResources = onSnapshot(collection(db, 'odonto_resources'), (snapshot) => {
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map((d) => d.data() as GoogleResourceLink);
+          isInternalChange.current = true;
+          googleResourcesRef.current = list;
+          setGoogleResources(list);
+          saveToStorage('google_resources', list);
+          setTimeout(() => { isInternalChange.current = false; }, 100);
+        }
+      }, (err) => console.warn('[Firestore] Resources listener:', err));
+      unsubscribers.push(unsubResources);
+
+      // 9. Student Profile doc listener
+      const unsubStudent = onSnapshot(doc(db, 'odonto_config', 'student'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as StudentProfile;
+          if (data && data.name) {
+            currentStudentRef.current = data;
+            setCurrentStudent(data);
+            saveToStorage('student_profile', data);
           }
         }
-      }, (err) => {
-        console.warn('Firestore snapshot error:', err);
-      });
+      }, (err) => console.warn('[Firestore] Student config listener:', err));
+      unsubscribers.push(unsubStudent);
 
-      return () => unsubscribe();
+      // 10. Dupla Partner doc listener
+      const unsubDupla = onSnapshot(doc(db, 'odonto_config', 'dupla'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as DuplaPartner;
+          if (data && data.name) {
+            duplaPartnerRef.current = data;
+            setDuplaPartner(data);
+            saveToStorage('dupla_partner', data);
+          }
+        }
+      }, (err) => console.warn('[Firestore] Dupla config listener:', err));
+      unsubscribers.push(unsubDupla);
+
+      // 11. Disciplines doc listener
+      const unsubDisciplines = onSnapshot(doc(db, 'odonto_config', 'disciplines'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && Array.isArray(data.list) && data.list.length > 0) {
+            disciplinesRef.current = data.list;
+            setDisciplines(data.list);
+            saveToStorage('disciplines', data.list);
+          }
+        }
+      }, (err) => console.warn('[Firestore] Disciplines config listener:', err));
+      unsubscribers.push(unsubDisciplines);
+
     } catch (e) {
-      console.warn('Could not attach Firestore listener:', e);
+      console.warn('Could not attach Firestore collection listeners:', e);
     }
+
+    return () => {
+      unsubscribers.forEach((fn) => fn());
+    };
   }, [isFirebaseActive]);
 
   // Multi-Tab Realtime Broadcast Channel Listener
@@ -923,109 +1115,276 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, []);
 
+  // Multi-Device Background Auto-Pulse & Visibility / Focus Re-sync
+  useEffect(() => {
+    // 1. Silent sync when app becomes visible or gains focus (mobile screen unlock, tab switch)
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        triggerCloudSyncSilent();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    // 2. Periodic background cloud pulse (every 25 seconds) to ensure permanent synchronization
+    const pulseInterval = setInterval(() => {
+      if (navigator.onLine && document.visibilityState === 'visible') {
+        triggerCloudSyncSilent();
+      }
+    }, 25000);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      clearInterval(pulseInterval);
+    };
+  }, []);
+
+  // Silent sync helper that keeps data merged without displaying disruptive loading spinners
+  const triggerCloudSyncSilent = async () => {
+    try {
+      const db = dbRef.current || getFirebaseDB();
+      if (db) {
+        const [
+          patSnap,
+          aptSnap,
+          taskSnap,
+          chatSnap,
+          noticeSnap,
+          studySnap,
+          examSnap,
+          resSnap,
+          studentSnap,
+          duplaSnap,
+          discSnap
+        ] = await Promise.all([
+          getDocs(collection(db, 'odonto_patients')),
+          getDocs(collection(db, 'odonto_appointments')),
+          getDocs(collection(db, 'odonto_tasks')),
+          getDocs(collection(db, 'odonto_chat')),
+          getDocs(collection(db, 'odonto_notices')),
+          getDocs(collection(db, 'odonto_studies')),
+          getDocs(collection(db, 'odonto_exams')),
+          getDocs(collection(db, 'odonto_resources')),
+          getDoc(doc(db, 'odonto_config', 'student')),
+          getDoc(doc(db, 'odonto_config', 'dupla')),
+          getDoc(doc(db, 'odonto_config', 'disciplines'))
+        ]);
+
+        if (!patSnap.empty) {
+          const list = patSnap.docs.map((d) => d.data() as Patient);
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          isInternalChange.current = true;
+          patientsRef.current = list;
+          setPatients(list);
+          saveToStorage('patients', list);
+        }
+        if (!aptSnap.empty) {
+          const list = aptSnap.docs.map((d) => d.data() as Appointment);
+          list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+          isInternalChange.current = true;
+          appointmentsRef.current = list;
+          setAppointments(list);
+          saveToStorage('appointments', list);
+        }
+        if (!taskSnap.empty) {
+          const list = taskSnap.docs.map((d) => d.data() as TaskItem);
+          list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          isInternalChange.current = true;
+          tasksRef.current = list;
+          setTasks(list);
+          saveToStorage('tasks', list);
+        }
+        if (!chatSnap.empty) {
+          const list = chatSnap.docs.map((d) => d.data() as ChatMessage);
+          list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+          isInternalChange.current = true;
+          chatMessagesRef.current = list;
+          setChatMessages(list);
+          saveToStorage('chat_messages', list);
+        }
+        if (!noticeSnap.empty) {
+          const list = noticeSnap.docs.map((d) => d.data() as AcademicNotice);
+          isInternalChange.current = true;
+          noticesRef.current = list;
+          setNotices(list);
+          saveToStorage('notices', list);
+        }
+        if (!studySnap.empty) {
+          const list = studySnap.docs.map((d) => d.data() as StudySubject);
+          isInternalChange.current = true;
+          studySubjectsRef.current = list;
+          setStudySubjects(list);
+          saveToStorage('study_subjects', list);
+        }
+        if (!examSnap.empty) {
+          const list = examSnap.docs.map((d) => d.data() as ExamSchedule);
+          isInternalChange.current = true;
+          examSchedulesRef.current = list;
+          setExamSchedules(list);
+          saveToStorage('exam_schedules', list);
+        }
+        if (!resSnap.empty) {
+          const list = resSnap.docs.map((d) => d.data() as GoogleResourceLink);
+          isInternalChange.current = true;
+          googleResourcesRef.current = list;
+          setGoogleResources(list);
+          saveToStorage('google_resources', list);
+        }
+        if (studentSnap.exists() && studentSnap.data()?.name) {
+          const data = studentSnap.data() as StudentProfile;
+          currentStudentRef.current = data;
+          setCurrentStudent(data);
+          saveToStorage('student_profile', data);
+        }
+        if (duplaSnap.exists() && duplaSnap.data()?.name) {
+          const data = duplaSnap.data() as DuplaPartner;
+          duplaPartnerRef.current = data;
+          setDuplaPartner(data);
+          saveToStorage('dupla_partner', data);
+        }
+        if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
+          disciplinesRef.current = discSnap.data().list as DisciplineConfig[];
+          setDisciplines(discSnap.data().list as DisciplineConfig[]);
+          saveToStorage('disciplines', discSnap.data().list);
+        }
+
+        const now = new Date();
+        setLastSyncedTime(`Hoje às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} (Firebase)`);
+        setSyncStatus('synced');
+        setTimeout(() => {
+          isInternalChange.current = false;
+        }, 100);
+      }
+    } catch {
+      // silent catch for background pulse
+    }
+  };
+
   // Manual & Automated Cloud Sync trigger
   const triggerCloudSync = async () => {
     setIsSyncing(true);
     setSyncStatus('syncing');
     try {
-      // 1. Fetch latest from Firebase Firestore FIRST
       const db = dbRef.current || getFirebaseDB();
-      let latestCloudData: any = null;
       if (db) {
-        try {
-          const docRef = doc(db, 'odonto_clinic', 'main_workspace');
-          const snap = await getDoc(docRef);
-          if (snap.exists()) {
-            const data = snap.data();
-            if (data && (data.patients || data.student || data.dupla || data.appointments)) {
-              latestCloudData = data;
-            }
+        const [
+          patSnap,
+          aptSnap,
+          taskSnap,
+          chatSnap,
+          noticeSnap,
+          studySnap,
+          examSnap,
+          resSnap,
+          studentSnap,
+          duplaSnap,
+          discSnap
+        ] = await Promise.all([
+          getDocs(collection(db, 'odonto_patients')),
+          getDocs(collection(db, 'odonto_appointments')),
+          getDocs(collection(db, 'odonto_tasks')),
+          getDocs(collection(db, 'odonto_chat')),
+          getDocs(collection(db, 'odonto_notices')),
+          getDocs(collection(db, 'odonto_studies')),
+          getDocs(collection(db, 'odonto_exams')),
+          getDocs(collection(db, 'odonto_resources')),
+          getDoc(doc(db, 'odonto_config', 'student')),
+          getDoc(doc(db, 'odonto_config', 'dupla')),
+          getDoc(doc(db, 'odonto_config', 'disciplines'))
+        ]);
+
+        const hasGranularData = !patSnap.empty || !aptSnap.empty || !taskSnap.empty;
+
+        if (hasGranularData) {
+          isInternalChange.current = true;
+          if (!patSnap.empty) {
+            const list = patSnap.docs.map((d) => d.data() as Patient);
+            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            patientsRef.current = list;
+            setPatients(list);
+            saveToStorage('patients', list);
           }
-        } catch (e) {
-          console.warn('[Firestore] Pull warning:', e);
+          if (!aptSnap.empty) {
+            const list = aptSnap.docs.map((d) => d.data() as Appointment);
+            list.sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+            appointmentsRef.current = list;
+            setAppointments(list);
+            saveToStorage('appointments', list);
+          }
+          if (!taskSnap.empty) {
+            const list = taskSnap.docs.map((d) => d.data() as TaskItem);
+            list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            tasksRef.current = list;
+            setTasks(list);
+            saveToStorage('tasks', list);
+          }
+          if (!chatSnap.empty) {
+            const list = chatSnap.docs.map((d) => d.data() as ChatMessage);
+            list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+            chatMessagesRef.current = list;
+            setChatMessages(list);
+            saveToStorage('chat_messages', list);
+          }
+          if (!noticeSnap.empty) {
+            const list = noticeSnap.docs.map((d) => d.data() as AcademicNotice);
+            noticesRef.current = list;
+            setNotices(list);
+            saveToStorage('notices', list);
+          }
+          if (!studySnap.empty) {
+            const list = studySnap.docs.map((d) => d.data() as StudySubject);
+            studySubjectsRef.current = list;
+            setStudySubjects(list);
+            saveToStorage('study_subjects', list);
+          }
+          if (!examSnap.empty) {
+            const list = examSnap.docs.map((d) => d.data() as ExamSchedule);
+            examSchedulesRef.current = list;
+            setExamSchedules(list);
+            saveToStorage('exam_schedules', list);
+          }
+          if (!resSnap.empty) {
+            const list = resSnap.docs.map((d) => d.data() as GoogleResourceLink);
+            googleResourcesRef.current = list;
+            setGoogleResources(list);
+            saveToStorage('google_resources', list);
+          }
+          if (studentSnap.exists() && studentSnap.data()?.name) {
+            const data = studentSnap.data() as StudentProfile;
+            currentStudentRef.current = data;
+            setCurrentStudent(data);
+            saveToStorage('student_profile', data);
+          }
+          if (duplaSnap.exists() && duplaSnap.data()?.name) {
+            const data = duplaSnap.data() as DuplaPartner;
+            duplaPartnerRef.current = data;
+            setDuplaPartner(data);
+            saveToStorage('dupla_partner', data);
+          }
+          if (discSnap.exists() && Array.isArray(discSnap.data()?.list) && discSnap.data().list.length > 0) {
+            disciplinesRef.current = discSnap.data().list as DisciplineConfig[];
+            setDisciplines(discSnap.data().list as DisciplineConfig[]);
+            saveToStorage('disciplines', discSnap.data().list);
+          }
+          setTimeout(() => {
+            isInternalChange.current = false;
+          }, 150);
+        } else {
+          // Push local state to collections
+          patientsRef.current.forEach((p) => firestoreSavePatient(p));
+          appointmentsRef.current.forEach((a) => firestoreSaveAppointment(a));
+          tasksRef.current.forEach((t) => firestoreSaveTask(t));
+          chatMessagesRef.current.forEach((m) => firestoreSaveChatMessage(m));
+          noticesRef.current.forEach((n) => firestoreSaveNotice(n));
+          studySubjectsRef.current.forEach((s) => firestoreSaveStudySubject(s));
+          examSchedulesRef.current.forEach((e) => firestoreSaveExamSchedule(e));
+          googleResourcesRef.current.forEach((r) => firestoreSaveResource(r));
+          firestoreSaveConfig('student', currentStudentRef.current);
+          firestoreSaveConfig('dupla', duplaPartnerRef.current);
+          firestoreSaveConfig('disciplines', { list: disciplinesRef.current });
         }
-      }
-
-      // 2. If not from Firestore, fetch from Server
-      if (!latestCloudData) {
-        const { state: serverState } = await fetchCloudState();
-        if (serverState && (serverState.patients || serverState.student || serverState.dupla || serverState.appointments)) {
-          latestCloudData = serverState;
-        }
-      }
-
-      // 3. If cloud data exists, merge non-destructively
-      if (latestCloudData) {
-        isInternalChange.current = true;
-        if (Array.isArray(latestCloudData.patients)) {
-          const merged = mergeRecords(patientsRef.current, latestCloudData.patients, deletedPatientIdsRef.current);
-          patientsRef.current = merged;
-          setPatients(merged);
-          saveToStorage('patients', merged);
-        }
-        if (Array.isArray(latestCloudData.appointments)) {
-          const merged = mergeRecords(appointmentsRef.current, latestCloudData.appointments, deletedAppointmentIdsRef.current);
-          appointmentsRef.current = merged;
-          setAppointments(merged);
-          saveToStorage('appointments', merged);
-        }
-        if (Array.isArray(latestCloudData.tasks)) {
-          const merged = mergeRecords(tasksRef.current, latestCloudData.tasks, deletedTaskIdsRef.current);
-          tasksRef.current = merged;
-          setTasks(merged);
-          saveToStorage('tasks', merged);
-        }
-        if (Array.isArray(latestCloudData.chatMessages)) {
-          const merged = mergeRecords(chatMessagesRef.current, latestCloudData.chatMessages, new Set());
-          chatMessagesRef.current = merged;
-          setChatMessages(merged);
-          saveToStorage('chat_messages', merged);
-        }
-        if (Array.isArray(latestCloudData.disciplines) && latestCloudData.disciplines.length > 0) {
-          disciplinesRef.current = latestCloudData.disciplines as DisciplineConfig[];
-          setDisciplines(latestCloudData.disciplines as DisciplineConfig[]);
-          saveToStorage('disciplines', latestCloudData.disciplines);
-        }
-        if (Array.isArray(latestCloudData.notices)) {
-          const merged = mergeRecords(noticesRef.current, latestCloudData.notices, new Set());
-          noticesRef.current = merged;
-          setNotices(merged);
-          saveToStorage('notices', merged);
-        }
-        if (Array.isArray(latestCloudData.studySubjects)) {
-          const merged = mergeRecords(studySubjectsRef.current, latestCloudData.studySubjects, new Set());
-          studySubjectsRef.current = merged;
-          setStudySubjects(merged);
-          saveToStorage('study_subjects', merged);
-        }
-        if (Array.isArray(latestCloudData.examSchedules)) {
-          const merged = mergeRecords(examSchedulesRef.current, latestCloudData.examSchedules, new Set());
-          examSchedulesRef.current = merged;
-          setExamSchedules(merged);
-          saveToStorage('exam_schedules', merged);
-        }
-        if (Array.isArray(latestCloudData.googleResources)) {
-          const merged = mergeRecords(googleResourcesRef.current, latestCloudData.googleResources, new Set());
-          googleResourcesRef.current = merged;
-          setGoogleResources(merged);
-          saveToStorage('google_resources', merged);
-        }
-        if (latestCloudData.student) {
-          currentStudentRef.current = latestCloudData.student;
-          setCurrentStudent(latestCloudData.student);
-          saveToStorage('student_profile', latestCloudData.student);
-        }
-        if (latestCloudData.dupla) {
-          duplaPartnerRef.current = latestCloudData.dupla;
-          setDuplaPartner(latestCloudData.dupla);
-          saveToStorage('dupla_partner', latestCloudData.dupla);
-        }
-        setTimeout(() => {
-          isInternalChange.current = false;
-        }, 150);
-      } else {
-        // Push local state to cloud
-        await syncStateToCloudAndFirestore(undefined, true);
       }
 
       setSyncStatus('synced');
@@ -1161,6 +1520,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     saveToStorage('appointments', updatedAppointments);
 
     if (selectedPatientId === id) setSelectedPatientId(null);
+
+    // Explicit granular Firestore deletion
+    firestoreDeletePatient(id);
+    appointmentsRef.current.filter((a) => a.patientId === id).forEach((a) => firestoreDeleteAppointment(a.id));
 
     broadcastStateChange('update_patients', updatedPatients);
     broadcastStateChange('update_appointments', updatedAppointments);
@@ -1338,6 +1701,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setAppointments(updated);
     saveToStorage('appointments', updated);
 
+    firestoreDeleteAppointment(id);
+
     broadcastStateChange('update_appointments', updated);
     syncStateToCloudAndFirestore({ appointments: updated }, true);
     showToast('Agendamento excluído.', 'info');
@@ -1398,6 +1763,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTasks(updated);
     saveToStorage('tasks', updated);
 
+    firestoreDeleteTask(id);
+
     broadcastStateChange('update_tasks', updated);
     syncStateToCloudAndFirestore({ tasks: updated }, true);
     showToast('Tarefa removida.', 'info');
@@ -1437,6 +1804,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     broadcastStateChange('update_chat', updated);
     pushChatMessageToCloud(newMsg);
+    syncStateToCloudAndFirestore({ chatMessages: updated }, true);
   };
 
   const sendVoiceMessage = (durationSeconds: number, audioUrl?: string, patientTag?: string) => {
@@ -1460,6 +1828,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     broadcastStateChange('update_chat', updated);
     pushChatMessageToCloud(newMsg);
+    syncStateToCloudAndFirestore({ chatMessages: updated }, true);
     showToast('Mensagem de voz enviada para a dupla!');
   };
 
@@ -1468,15 +1837,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     chatMessagesRef.current = updated;
     setChatMessages(updated);
     saveToStorage('chat_messages', updated);
+    firestoreDeleteChatMessage(id);
     broadcastStateChange('update_chat', updated);
+    syncStateToCloudAndFirestore({ chatMessages: updated }, true);
     showToast('Mensagem removida.', 'info');
   };
 
   const clearChatMessages = () => {
+    chatMessagesRef.current.forEach((m) => firestoreDeleteChatMessage(m.id));
     chatMessagesRef.current = [];
     setChatMessages([]);
     saveToStorage('chat_messages', []);
     broadcastStateChange('update_chat', []);
+    syncStateToCloudAndFirestore({ chatMessages: [] }, true);
     showToast('Histórico do chat limpo.', 'info');
   };
 
@@ -1501,6 +1874,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     noticesRef.current = updated;
     setNotices(updated);
     saveToStorage('notices', updated);
+    firestoreDeleteNotice(id);
     broadcastStateChange('update_notices', updated);
     syncStateToCloudAndFirestore({ notices: updated }, true);
     showToast('Aviso acadêmico excluído.', 'info');
@@ -1512,6 +1886,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setNotices(updated);
     saveToStorage('notices', updated);
     broadcastStateChange('update_notices', updated);
+    syncStateToCloudAndFirestore({ notices: updated }, true);
   };
 
   const updateDiscipline = (id: string, updates: Partial<DisciplineConfig>) => {
@@ -1565,6 +1940,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     studySubjectsRef.current = updated;
     setStudySubjects(updated);
     saveToStorage('study_subjects', updated);
+    firestoreDeleteStudySubject(id);
     broadcastStateChange('update_studies', updated);
     syncStateToCloudAndFirestore({ studySubjects: updated }, true);
     showToast('Matéria removida dos estudos.', 'info');
@@ -1649,6 +2025,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     examSchedulesRef.current = updated;
     setExamSchedules(updated);
     saveToStorage('exam_schedules', updated);
+    firestoreDeleteExamSchedule(id);
     broadcastStateChange('update_exams', updated);
     syncStateToCloudAndFirestore({ examSchedules: updated }, true);
     showToast('Prova removida do cronograma.', 'info');
@@ -1674,6 +2051,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     googleResourcesRef.current = updated;
     setGoogleResources(updated);
     saveToStorage('google_resources', updated);
+    firestoreDeleteResource(id);
     broadcastStateChange('update_resources', updated);
     syncStateToCloudAndFirestore({ googleResources: updated }, true);
     showToast('Atalho removido.', 'info');

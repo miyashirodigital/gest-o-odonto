@@ -17,6 +17,10 @@
           "type": "array",
           "description": "Checklist and clinical tasks"
         },
+        "chatMessages": {
+          "type": "array",
+          "description": "Real-time communication chat messages between clinical duo and devices"
+        },
         "disciplines": {
           "type": "array",
           "description": "Academic dental disciplines and procedure counts"
@@ -24,6 +28,18 @@
         "notices": {
           "type": "array",
           "description": "Academic notices and exam deadlines"
+        },
+        "studySubjects": {
+          "type": "array",
+          "description": "Study planner topics and academic dental subjects"
+        },
+        "examSchedules": {
+          "type": "array",
+          "description": "Dental exam dates and academic evaluation schedules"
+        },
+        "googleResources": {
+          "type": "array",
+          "description": "Google Drive and classroom clinical documentation links"
         },
         "student": {
           "type": "object",
@@ -45,6 +61,42 @@
     }
   },
   "firestore": {
+    "/odonto_patients/{patientId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Individual dental patient chart record with odontogram and evolutions"
+    },
+    "/odonto_appointments/{appointmentId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Clinical appointment and scheduling record"
+    },
+    "/odonto_tasks/{taskId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Clinical and academic checklist task"
+    },
+    "/odonto_chat/{messageId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Real-time chat and clinical voice message"
+    },
+    "/odonto_notices/{noticeId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Academic notices and exam announcements"
+    },
+    "/odonto_studies/{subjectId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Study planner topics and academic dental subjects"
+    },
+    "/odonto_exams/{examId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Dental exam dates and academic evaluation schedules"
+    },
+    "/odonto_resources/{resourceId}": {
+      "schema": "ClinicWorkspace",
+      "description": "Google Drive and classroom clinical documentation links"
+    },
+    "/odonto_config/{configDoc}": {
+      "schema": "ClinicWorkspace",
+      "description": "Student profile, dupla, disciplines and app configuration"
+    },
     "/odonto_clinic/{workspaceId}": {
       "schema": "ClinicWorkspace",
       "description": "Clinic shared workspace document for real-time synchronization across student devices"
