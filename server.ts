@@ -3,11 +3,28 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const PORT = 3000;
+
+// Supabase Configuration
+const SUPABASE_DEFAULT_URL = 'https://ywsrmwslcyevvwuotwpu.supabase.co';
+const SUPABASE_DEFAULT_KEY = 'sb_publishable_0aT9kjM33THbbFvpuz-j_g_sYacrfBO';
+
+function getNormalizedSupabaseUrl(url?: string): string {
+  const target = url || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || SUPABASE_DEFAULT_URL;
+  return target.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+}
+
+function getServerSupabaseClient() {
+  const url = getNormalizedSupabaseUrl();
+  const key = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || SUPABASE_DEFAULT_KEY).trim();
+  if (!url || !key) return null;
+  return createSupabaseClient(url, key);
+}
 
 const DENTAL_SYSTEM_INSTRUCTION = `Você é o "OdontoMentor IA", um mentor ágil, amigável e especialista em Odontologia.
 
@@ -399,6 +416,208 @@ async function startServer() {
       });
 
       return res.json({ success: true, message });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Supabase Integration Endpoints ---
+  app.get('/api/supabase/status', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      const url = getNormalizedSupabaseUrl();
+      if (!client) {
+        return res.json({
+          connected: false,
+          url,
+          tablesAvailable: { clinic_sync: false, patients: false, appointments: false, tasks: false },
+          hasAnyTable: false,
+          error: 'Credenciais do Supabase não configuradas no servidor.'
+        });
+      }
+
+      const tables = {
+        clinic_sync: false,
+        patients: false,
+        appointments: false,
+        tasks: false
+      };
+
+      let lastError: string | undefined;
+
+      const { error: syncErr } = await client.from('clinic_sync').select('id').limit(1);
+      if (!syncErr) tables.clinic_sync = true;
+      else if (syncErr.code !== 'PGRST205') lastError = syncErr.message;
+
+      const { error: patErr } = await client.from('patients').select('id').limit(1);
+      if (!patErr) tables.patients = true;
+      else if (patErr.code !== 'PGRST205') lastError = patErr.message;
+
+      const { error: aptErr } = await client.from('appointments').select('id').limit(1);
+      if (!aptErr) tables.appointments = true;
+
+      const { error: taskErr } = await client.from('tasks').select('id').limit(1);
+      if (!taskErr) tables.tasks = true;
+
+      const hasAnyTable = tables.clinic_sync || tables.patients || tables.appointments || tables.tasks;
+
+      return res.json({
+        connected: true,
+        url,
+        tablesAvailable: tables,
+        hasAnyTable,
+        error: lastError,
+        hint: !hasAnyTable ? 'Conexão ativa com o Supabase! Crie as tabelas no SQL Editor para iniciar a sincronização.' : undefined
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        connected: false,
+        error: err.message || 'Erro ao conectar com o Supabase'
+      });
+    }
+  });
+
+  app.post('/api/supabase/sync', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      if (!client) {
+        return res.status(400).json({ error: 'Supabase não inicializado no servidor.' });
+      }
+
+      const payload = req.body && Object.keys(req.body).length > 0 ? req.body : globalSyncState;
+      let syncedCount = 0;
+
+      // 1. Central clinic_sync
+      const { error: syncErr } = await client
+        .from('clinic_sync')
+        .upsert({
+          id: 'main_clinic',
+          payload,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+
+      if (!syncErr) syncedCount++;
+
+      // 2. Patients table if exists
+      if (Array.isArray(payload.patients) && payload.patients.length > 0) {
+        const patientRows = payload.patients.map((p: any) => ({
+          id: p.id,
+          name: p.name || 'Paciente',
+          cpf: p.cpf || '',
+          record_number: p.recordNumber || '',
+          discipline: p.discipline || 'Clínica Geral',
+          data: p,
+          updated_at: p.updatedAt || new Date().toISOString()
+        }));
+
+        const { error: patErr } = await client.from('patients').upsert(patientRows, { onConflict: 'id' });
+        if (!patErr) syncedCount++;
+      }
+
+      // 3. Appointments table if exists
+      if (Array.isArray(payload.appointments) && payload.appointments.length > 0) {
+        const aptRows = payload.appointments.map((a: any) => ({
+          id: a.id,
+          patient_id: a.patientId,
+          patient_name: a.patientName,
+          date: a.date,
+          start_time: a.startTime,
+          end_time: a.endTime,
+          discipline: a.discipline,
+          status: a.status,
+          data: a,
+          updated_at: new Date().toISOString()
+        }));
+
+        const { error: aptErr } = await client.from('appointments').upsert(aptRows, { onConflict: 'id' });
+        if (!aptErr) syncedCount++;
+      }
+
+      return res.json({
+        success: syncedCount > 0,
+        syncedTablesCount: syncedCount,
+        message: syncedCount > 0 
+          ? 'Dados sincronizados com o Supabase com sucesso!' 
+          : 'As tabelas ainda não existem no banco Supabase. Execute o script SQL no painel.'
+      });
+    } catch (err: any) {
+      console.error('[Supabase Server Sync Error]:', err);
+      return res.status(500).json({ error: err.message || 'Erro ao sincronizar com Supabase' });
+    }
+  });
+
+  app.get('/api/supabase/pull', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      if (!client) {
+        return res.status(400).json({ error: 'Supabase não inicializado no servidor.' });
+      }
+
+      // Read from clinic_sync first
+      const { data: syncRow, error: syncErr } = await client
+        .from('clinic_sync')
+        .select('payload')
+        .eq('id', 'main_clinic')
+        .maybeSingle();
+
+      if (!syncErr && syncRow?.payload) {
+        return res.json({ success: true, data: syncRow.payload, source: 'clinic_sync' });
+      }
+
+      // Fallback: read patients
+      const { data: patRows, error: patErr } = await client
+        .from('patients')
+        .select('data');
+
+      if (!patErr && patRows && patRows.length > 0) {
+        const patients = patRows.map((r: any) => r.data);
+        return res.json({ success: true, data: { patients }, source: 'patients' });
+      }
+
+      return res.json({ success: false, message: 'Nenhum dado encontrado no Supabase' });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Granular secure delete endpoints
+  app.delete('/api/supabase/patients/:id', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      if (!client) return res.status(400).json({ error: 'Supabase não inicializado' });
+      const { id } = req.params;
+      if (!id || id.length < 2) return res.status(400).json({ error: 'ID inválido' });
+      const { error } = await client.from('patients').delete().eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/supabase/appointments/:id', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      if (!client) return res.status(400).json({ error: 'Supabase não inicializado' });
+      const { id } = req.params;
+      if (!id || id.length < 2) return res.status(400).json({ error: 'ID inválido' });
+      const { error } = await client.from('appointments').delete().eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/supabase/tasks/:id', async (req, res) => {
+    try {
+      const client = getServerSupabaseClient();
+      if (!client) return res.status(400).json({ error: 'Supabase não inicializado' });
+      const { id } = req.params;
+      if (!id || id.length < 2) return res.status(400).json({ error: 'ID inválido' });
+      const { error } = await client.from('tasks').delete().eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

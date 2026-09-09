@@ -327,7 +327,7 @@ export const SettingsView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Deseja recarregar o banco de dados inicial de demonstração?')) {
+                if (window.confirm('Deseja restaurar os dados de demonstração da clínica?')) {
                   resetToDefaultData();
                 }
               }}

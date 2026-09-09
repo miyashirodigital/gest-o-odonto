@@ -71,6 +71,19 @@ import {
   getOrCreateDeviceId,
   CloudClinicState
 } from '../utils/cloudSync';
+import {
+  checkSupabaseStatus,
+  pushStateToSupabase,
+  pullStateFromSupabase,
+  deletePatientFromSupabase,
+  deleteAppointmentFromSupabase,
+  deleteTaskFromSupabase,
+  SupabaseStatusResult,
+  SupabaseConfig,
+  saveSupabaseConfig,
+  getSavedSupabaseConfig,
+  DEFAULT_SUPABASE_URL
+} from '../utils/supabase';
 
 export type ViewTab = 
   | 'dashboard' 
@@ -114,6 +127,13 @@ interface AppContextType {
   firebaseCustomConfig: FirebaseCustomConfig | null;
   updateFirebaseConfig: (config: FirebaseCustomConfig) => void;
   disconnectFirebase: () => void;
+
+  // Supabase integration
+  supabaseStatus: SupabaseStatusResult;
+  isSupabaseConnected: boolean;
+  syncSupabaseNow: () => Promise<boolean>;
+  refreshSupabaseStatus: () => Promise<void>;
+  updateSupabaseConfig: (config: SupabaseConfig) => void;
 
   // Student & Dupla Profile
   currentStudent: StudentProfile;
@@ -219,6 +239,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('Nuvem Ativa');
   const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
+
+  // Supabase Integration State
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatusResult>(() => ({
+    connected: false,
+    url: getSavedSupabaseConfig().url || DEFAULT_SUPABASE_URL,
+    tablesAvailable: { clinic_sync: false, patients: false, appointments: false, tasks: false },
+    hasAnyTable: false
+  }));
 
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [toastData, setToastData] = useState<{ text: string; type: 'success' | 'info' | 'warning' | 'error' } | null>(null);
@@ -507,6 +535,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           console.warn('[Firestore] Sync warning:', e);
         }
       }
+
+      // 3. Push to Supabase database (background auto-sync)
+      pushStateToSupabase(payload).catch((e) => {
+        console.warn('[Supabase] Background sync warning:', e);
+      });
     };
 
     if (forceImmediate) {
@@ -1445,6 +1478,58 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     showToast('Firebase desconectado. Operando em modo de banco local.', 'info');
   };
 
+  // Supabase Actions
+  const refreshSupabaseStatus = useCallback(async () => {
+    try {
+      const status = await checkSupabaseStatus();
+      setSupabaseStatus(status);
+    } catch (e) {
+      console.warn('[Supabase] check status error:', e);
+    }
+  }, []);
+
+  const updateSupabaseConfig = (config: SupabaseConfig) => {
+    saveSupabaseConfig(config);
+    refreshSupabaseStatus();
+    showToast('Configuração do Supabase salva com sucesso!', 'success');
+  };
+
+  const syncSupabaseNow = async (): Promise<boolean> => {
+    try {
+      setSyncStatus('syncing');
+      const payload: CloudClinicState = {
+        patients: patientsRef.current,
+        appointments: appointmentsRef.current,
+        tasks: tasksRef.current,
+        disciplines: disciplinesRef.current,
+        notices: noticesRef.current,
+        studySubjects: studySubjectsRef.current,
+        examSchedules: examSchedulesRef.current,
+        student: currentStudentRef.current,
+        dupla: duplaPartnerRef.current,
+        updatedAt: Date.now()
+      };
+      const res = await pushStateToSupabase(payload);
+      await refreshSupabaseStatus();
+      setSyncStatus('synced');
+      if (res.success) {
+        showToast('Sincronizado com o Supabase com sucesso!', 'success');
+        return true;
+      } else {
+        showToast(res.message || 'Supabase conectado, aguardando criação das tabelas no SQL Editor.', 'warning');
+        return false;
+      }
+    } catch (err: any) {
+      setSyncStatus('synced');
+      showToast('Erro ao sincronizar com Supabase: ' + (err.message || err), 'error');
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    refreshSupabaseStatus();
+  }, [refreshSupabaseStatus]);
+
   // Student Profile Updates
   const updateCurrentStudent = (updates: Partial<StudentProfile>) => {
     const updated = { ...currentStudentRef.current, ...updates };
@@ -1545,9 +1630,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (selectedPatientId === id) setSelectedPatientId(null);
 
-    // Explicit granular Firestore deletion
+    // Explicit granular Firestore and Supabase deletion
     firestoreDeletePatient(id);
-    appointmentsRef.current.filter((a) => a.patientId === id).forEach((a) => firestoreDeleteAppointment(a.id));
+    deletePatientFromSupabase(id);
+    appointmentsRef.current.filter((a) => a.patientId === id).forEach((a) => {
+      firestoreDeleteAppointment(a.id);
+      deleteAppointmentFromSupabase(a.id);
+    });
 
     broadcastStateChange('update_patients', updatedPatients);
     broadcastStateChange('update_appointments', updatedAppointments);
@@ -1726,6 +1815,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     saveToStorage('appointments', updated);
 
     firestoreDeleteAppointment(id);
+    deleteAppointmentFromSupabase(id);
 
     broadcastStateChange('update_appointments', updated);
     syncStateToCloudAndFirestore({ appointments: updated }, true);
@@ -1788,6 +1878,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     saveToStorage('tasks', updated);
 
     firestoreDeleteTask(id);
+    deleteTaskFromSupabase(id);
 
     broadcastStateChange('update_tasks', updated);
     syncStateToCloudAndFirestore({ tasks: updated }, true);
@@ -2156,6 +2247,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         firebaseCustomConfig,
         updateFirebaseConfig,
         disconnectFirebase,
+        supabaseStatus,
+        isSupabaseConnected: supabaseStatus.connected,
+        syncSupabaseNow,
+        refreshSupabaseStatus,
+        updateSupabaseConfig,
         currentStudent,
         updateCurrentStudent,
         duplaPartner,
